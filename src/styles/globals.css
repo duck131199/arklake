@@ -22,6 +22,24 @@ body {
   color: #142127;
 }
 
+.site-shell {
+  width: auto;
+  max-width: 1280px;
+  margin-inline: 16px;
+}
+
+@media (min-width: 640px) {
+  .site-shell {
+    margin-inline: 18px;
+  }
+}
+
+@media (min-width: 1316px) {
+  .site-shell {
+    margin-inline: auto;
+  }
+}
+
 button,
 input,
 textarea,
