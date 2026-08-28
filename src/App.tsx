@@ -274,6 +274,138 @@ function ProductPreviewSection() {
   )
 }
 
+const howItWorksSteps = [
+  {
+    number: '01',
+    title: 'Create invoice',
+    description: "Enter the payer's email, amount and payment details.",
+    ui: (
+      <div className="space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-sm font-semibold text-arklake-ink">New invoice</p>
+          <span className="rounded-full bg-aqua-mist px-2.5 py-1 text-[0.65rem] font-semibold text-arklake-ink">Draft</span>
+        </div>
+        <div className="space-y-2 text-xs text-slate">
+          <div className="rounded-2xl border border-lake-border bg-lake-canvas px-3 py-2.5"><span className="font-medium text-deep-text">Bill to:</span> alex@mail.com</div>
+          <div className="rounded-2xl border border-lake-border bg-lake-canvas px-3 py-2.5"><span className="font-medium text-deep-text">Amount:</span> 125.00 USDC</div>
+          <div className="rounded-2xl border border-lake-border bg-lake-canvas px-3 py-2.5"><span className="font-medium text-deep-text">Memo:</span> Website project</div>
+        </div>
+        <div className="rounded-full bg-arklake-ink px-4 py-2.5 text-center text-xs font-semibold text-white">Create invoice</div>
+      </div>
+    ),
+  },
+  {
+    number: '02',
+    title: 'Payer receives email',
+    description: 'They receive the invoice with a secure link to review and pay.',
+    ui: (
+      <div className="space-y-3">
+        <p className="text-sm font-semibold text-arklake-ink">Arklake invoice email</p>
+        <div className="rounded-3xl border border-lake-border bg-lake-canvas p-4">
+          <p className="text-xs font-medium text-slate">You have a new invoice from Acme Co.</p>
+          <p className="mt-3 text-lg font-semibold tracking-[-0.03em] text-arklake-ink">Amount due: 125.00 USDC</p>
+          <div className="mt-4 rounded-full bg-aqua-mist px-4 py-2.5 text-center text-xs font-semibold text-arklake-ink">View invoice & pay</div>
+        </div>
+        <div className="grid grid-cols-2 gap-2 text-[0.7rem] text-slate">
+          <span className="rounded-full bg-surface px-3 py-2">Invoice #INV-104</span>
+          <span className="rounded-full bg-surface px-3 py-2">Due Aug 12, 2026</span>
+        </div>
+      </div>
+    ),
+  },
+  {
+    number: '03',
+    title: 'Choose how to pay',
+    description: 'Sign in to Arklake, scan the invoice QR, or connect a wallet.',
+    ui: (
+      <div className="space-y-3">
+        {[
+          ['Pay with Arklake', 'Sign in or create account'],
+          ['Scan QR', 'Pay with another wallet'],
+          ['Connect wallet', 'Pay without an Arklake account'],
+        ].map(([label, copy], index) => (
+          <div key={label} className={`flex min-w-0 items-center gap-3 rounded-2xl border px-3 py-3 ${index === 0 ? 'border-arklake-aqua/30 bg-aqua-mist' : 'border-lake-border bg-lake-canvas'}`}>
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface text-xs font-semibold text-arklake-ink">{index + 1}</span>
+            <span className="min-w-0">
+              <span className="block truncate text-sm font-semibold text-arklake-ink">{label}</span>
+              <span className="block text-xs leading-4 text-slate">{copy}</span>
+            </span>
+          </div>
+        ))}
+      </div>
+    ),
+  },
+  {
+    number: '04',
+    title: 'Payment verified',
+    description: 'Arklake verifies the payment on-chain before the invoice is marked as paid.',
+    ui: (
+      <div className="space-y-3">
+        <div className="rounded-3xl border border-arklake-aqua/30 bg-aqua-mist p-4">
+          <p className="text-sm font-semibold text-arklake-ink">Payment verified</p>
+          <p className="mt-2 text-xs leading-5 text-slate">125.00 USDC has been paid and verified on-chain.</p>
+        </div>
+        <div className="space-y-2 text-xs">
+          {[
+            ['Invoice:', 'INV-104'],
+            ['Status:', 'Paid'],
+            ['Date', 'Aug 05, 2026 — 10:24 AM'],
+            ['Tx hash', '0x7a9...42f'],
+          ].map(([label, value]) => (
+            <div key={label} className="flex min-w-0 items-center justify-between gap-3 rounded-2xl border border-lake-border bg-lake-canvas px-3 py-2.5">
+              <span className="shrink-0 text-slate">{label}</span>
+              <span className="min-w-0 truncate font-semibold text-arklake-ink">{value}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    ),
+  },
+]
+
+function HowItWorksSection() {
+  return (
+    <section id="how-it-works" className={`${shellWidth} pb-24 pt-2 lg:pb-32 lg:pt-0`}>
+      <div className="mx-auto max-w-3xl min-w-0 text-center">
+        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-arklake-aqua">How it works</p>
+        <h2 className="mx-auto mt-4 max-w-[20rem] text-[2rem] font-semibold leading-[1.04] tracking-[-0.055em] text-arklake-ink sm:max-w-[44rem] sm:text-5xl">
+          From invoice to payment, simply.
+        </h2>
+        <p className="mx-auto mt-4 max-w-[20rem] text-base leading-7 text-slate sm:max-w-[40rem] sm:text-lg sm:leading-8">
+          Create an invoice and get paid through one straightforward flow.
+        </p>
+      </div>
+
+      <div className="relative mt-12 grid min-w-0 grid-cols-1 gap-5 lg:mt-14 lg:grid-cols-4 lg:gap-5">
+        <div className="absolute left-1/2 top-0 hidden h-px w-[74%] -translate-x-1/2 bg-arklake-aqua/20 lg:block" aria-hidden="true" />
+        {howItWorksSteps.map((step, index) => (
+          <article key={step.number} className="relative min-w-0 rounded-[2rem] border border-lake-border bg-surface p-5 shadow-[0_18px_54px_rgba(20,33,39,0.07)] sm:p-6">
+            <div className="absolute -top-3 left-6 flex h-8 w-8 items-center justify-center rounded-full border border-arklake-aqua/35 bg-aqua-mist text-xs font-semibold text-arklake-ink shadow-[0_0_0_6px_rgba(50,199,193,0.08)]">
+              {step.number}
+            </div>
+            {index < howItWorksSteps.length - 1 ? (
+              <div className="absolute -bottom-4 left-1/2 flex h-8 w-8 -translate-x-1/2 items-center justify-center rounded-full border border-arklake-aqua/25 bg-surface text-arklake-aqua lg:-right-6 lg:bottom-auto lg:left-auto lg:top-14 lg:translate-x-0" aria-hidden="true">
+                <svg className="h-4 w-4 rotate-90 lg:rotate-0" viewBox="0 0 16 16" fill="none">
+                  <path d="M3 8h9" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+                  <path d="m9 5 3 3-3 3" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </div>
+            ) : null}
+
+            <div className="pt-5">
+              <h3 className="text-xl font-semibold tracking-[-0.03em] text-arklake-ink">{step.title}</h3>
+              <p className="mt-3 text-sm leading-6 text-slate lg:min-h-[4.5rem]">{step.description}</p>
+            </div>
+            <div className="mt-6 min-w-0 rounded-[1.6rem] border border-lake-border bg-surface p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.75)]">
+              {step.ui}
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  )
+}
+
 export default function App() {
   return (
     <main className="min-h-screen bg-lake-canvas text-deep-text">
@@ -349,6 +481,7 @@ export default function App() {
 
       <FeaturesSection />
       <ProductPreviewSection />
+      <HowItWorksSection />
     </main>
   )
 }
