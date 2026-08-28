@@ -4,6 +4,12 @@ Thumbs.db
 .vscode/
 .idea/
 
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
 # Local environment files
 .env
 .env.*
