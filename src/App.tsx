@@ -156,6 +156,124 @@ function FeaturesSection() {
   )
 }
 
+const sidebarItems = ['Home', 'Invoices', 'Wallet', 'Swap', 'Account']
+
+const invoiceRows = [
+  { id: 'INV-104', status: 'Paid' },
+  { id: 'INV-103', status: 'Unpaid' },
+  { id: 'INV-102', status: 'Unpaid' },
+]
+
+function ProductPreviewSection() {
+  return (
+    <section id="product-preview" className={`${shellWidth} pb-24 pt-4 lg:pb-32 lg:pt-2`}>
+      <div className="mx-auto max-w-3xl min-w-0 text-center">
+        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-arklake-aqua">See Arklake in action</p>
+        <h2 className="mx-auto mt-4 max-w-[20rem] text-[2rem] font-semibold leading-[1.04] tracking-[-0.055em] text-arklake-ink sm:max-w-[46rem] sm:text-5xl">
+          Your home for stablecoin payments.
+        </h2>
+        <p className="mx-auto mt-4 max-w-[20rem] text-base leading-7 text-slate sm:max-w-[42rem] sm:text-lg sm:leading-8">
+          Manage invoices, send and receive payments, and access your balance — all in one place.
+        </p>
+      </div>
+
+      <div className="mx-auto mt-12 w-full min-w-0 max-w-[1080px] rounded-[2rem] border border-lake-border bg-surface p-3 shadow-[0_34px_96px_rgba(20,33,39,0.12)] sm:rounded-[2.5rem] sm:p-4 lg:mt-14">
+        <div className="grid min-w-0 grid-cols-1 overflow-hidden rounded-[1.55rem] border border-lake-border bg-lake-canvas sm:rounded-[2rem] lg:grid-cols-[220px_minmax(0,1fr)]">
+          <aside className="min-w-0 border-b border-lake-border bg-surface p-4 lg:border-b-0 lg:border-r lg:p-5">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-aqua-mist text-arklake-aqua">
+                <svg className="h-5 w-5" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                  <path d="M5.25 11.5 10 5.25l4.75 6.25v3.25A1.25 1.25 0 0 1 13.5 16h-7a1.25 1.25 0 0 1-1.25-1.25V11.5Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+                  <path d="M8.25 16v-4h3.5v4" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+                </svg>
+              </div>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold text-arklake-ink">Arklake</p>
+                <p className="truncate text-xs text-slate">Payment account</p>
+              </div>
+            </div>
+
+            <nav className="mt-5 flex min-w-0 gap-2 overflow-hidden lg:block lg:space-y-2" aria-label="Product preview navigation">
+              {sidebarItems.map((item) => {
+                const isActive = item === 'Home'
+                return (
+                  <div
+                    key={item}
+                    className={`min-w-0 shrink rounded-full px-3 py-2 text-xs font-semibold lg:flex lg:w-full lg:items-center lg:rounded-2xl lg:px-4 lg:text-sm ${
+                      isActive ? 'bg-aqua-mist text-arklake-ink' : 'text-slate'
+                    }`}
+                  >
+                    <span className="truncate">{item}</span>
+                  </div>
+                )
+              })}
+            </nav>
+          </aside>
+
+          <div className="min-w-0 p-4 sm:p-5 lg:p-6">
+            <div className="flex min-w-0 items-center justify-between gap-3">
+              <button className="inline-flex min-w-0 items-center justify-center rounded-full bg-arklake-ink px-4 py-2.5 text-sm font-semibold text-white shadow-sm">
+                <span className="truncate">Create invoice</span>
+              </button>
+              <div className="flex shrink-0 items-center gap-2">
+                <button className="flex h-10 w-10 items-center justify-center rounded-full border border-lake-border bg-surface text-slate" aria-label="Notifications">
+                  <svg className="h-4 w-4" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <path d="M4.75 6.9a3.25 3.25 0 0 1 6.5 0v2.35l1 1.85h-8.5l1-1.85V6.9Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+                    <path d="M6.75 12.15a1.35 1.35 0 0 0 2.5 0" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                  </svg>
+                </button>
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-arklake-ink text-sm font-semibold text-white">A</div>
+              </div>
+            </div>
+
+            <div className="mt-5 grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_320px] lg:gap-5">
+              <div className="min-w-0 rounded-[1.75rem] border border-lake-border bg-surface p-5 sm:p-6">
+                <p className="text-sm font-medium text-slate">Available to pay</p>
+                <p className="mt-3 text-[2.15rem] font-semibold leading-none tracking-[-0.06em] text-arklake-ink sm:text-5xl">1,240.50 USDC</p>
+                <p className="mt-3 text-sm text-slate">≈ $1,240.50 USD</p>
+
+                <div className="mt-6 grid min-w-0 grid-cols-3 gap-2 sm:gap-3">
+                  {['Receive', 'Send', 'Swap'].map((action, index) => (
+                    <button
+                      key={action}
+                      className={`min-w-0 rounded-2xl border px-2 py-3 text-xs font-semibold sm:text-sm ${
+                        index === 0 ? 'border-arklake-aqua/30 bg-aqua-mist text-arklake-ink' : 'border-lake-border bg-lake-canvas text-arklake-ink'
+                      }`}
+                    >
+                      <span className="truncate">{action}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="min-w-0 rounded-[1.75rem] border border-lake-border bg-surface p-5 sm:p-6">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="text-base font-semibold tracking-[-0.02em] text-arklake-ink">Invoices</h3>
+                  <span className="rounded-full bg-lake-canvas px-3 py-1 text-xs font-medium text-slate">3 total</span>
+                </div>
+
+                <div className="mt-5 space-y-3">
+                  {invoiceRows.map((invoice) => {
+                    const isPaid = invoice.status === 'Paid'
+                    return (
+                      <div key={invoice.id} className="flex min-w-0 items-center justify-between gap-3 rounded-2xl border border-lake-border bg-lake-canvas px-4 py-3">
+                        <span className="min-w-0 truncate text-sm font-semibold text-deep-text">{invoice.id}</span>
+                        <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${isPaid ? 'bg-aqua-mist text-arklake-ink' : 'bg-surface text-slate'}`}>
+                          {invoice.status}
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
 export default function App() {
   return (
     <main className="min-h-screen bg-lake-canvas text-deep-text">
@@ -230,6 +348,7 @@ export default function App() {
       </section>
 
       <FeaturesSection />
+      <ProductPreviewSection />
     </main>
   )
 }
