@@ -543,6 +543,76 @@ function FinalCtaSection() {
   )
 }
 
+const footerColumns = [
+  {
+    title: 'Product',
+    links: [
+      { label: 'Invoicing' },
+      { label: 'Wallet' },
+      { label: 'Swap' },
+    ],
+  },
+  {
+    title: 'Resources',
+    links: [
+      { label: 'Docs' },
+      { label: 'How it works', href: '#how-it-works' },
+    ],
+  },
+  {
+    title: 'Company',
+    links: [{ label: 'About' }],
+  },
+]
+
+function FooterLink({ label, href }: { label: string; href?: string }) {
+  if (href) {
+    return (
+      <a className="text-sm leading-6 text-slate transition hover:text-arklake-ink" href={href}>
+        {label}
+      </a>
+    )
+  }
+
+  return <span className="text-sm leading-6 text-slate">{label}</span>
+}
+
+function Footer() {
+  return (
+    <footer className="mt-2 w-full min-w-0 border-t border-lake-border bg-aqua-mist/45">
+      <div className={`${shellWidth} pt-12 sm:pt-14 lg:pt-16`}>
+        <div className="grid min-w-0 grid-cols-1 gap-10 pb-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)] lg:gap-16 lg:pb-14">
+          <div className="min-w-0">
+            <a href="#" className="inline-flex max-w-full items-center text-arklake-ink">
+              <ProductMark />
+            </a>
+            <p className="mt-6 max-w-[16rem] text-2xl font-semibold leading-[1.08] tracking-[-0.045em] text-arklake-ink sm:text-3xl">
+              Stablecoin payments,<br /> made simple.
+            </p>
+          </div>
+
+          <div className="grid min-w-0 grid-cols-1 gap-8 sm:grid-cols-3 sm:gap-6">
+            {footerColumns.map((column) => (
+              <div key={column.title} className="min-w-0">
+                <h2 className="text-sm font-semibold tracking-[-0.01em] text-arklake-ink">{column.title}</h2>
+                <div className="mt-4 flex min-w-0 flex-col gap-3">
+                  {column.links.map((link) => (
+                    <FooterLink key={link.label} {...link} />
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="border-t border-lake-border py-7 sm:py-8">
+          <p className="text-sm leading-6 text-slate">© 2026 Arklake. All rights reserved.</p>
+        </div>
+      </div>
+    </footer>
+  )
+}
+
 export default function App() {
   return (
     <main className="min-h-screen bg-lake-canvas text-deep-text">
@@ -621,6 +691,7 @@ export default function App() {
       <HowItWorksSection />
       <InfrastructureSection />
       <FinalCtaSection />
+      <Footer />
     </main>
   )
 }
