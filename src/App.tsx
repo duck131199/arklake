@@ -406,6 +406,64 @@ function HowItWorksSection() {
   )
 }
 
+const infrastructureCards = [
+  {
+    title: 'Arc',
+    subtitle: 'Stablecoin-focused blockchain.',
+    body: 'The network where Arklake settles and verifies USDC payments on-chain.',
+    tone: 'aqua',
+    icon: '/brand/arc-network-icon.svg',
+  },
+  {
+    title: 'Circle',
+    subtitle: 'Wallet and USDC infrastructure.',
+    body: 'Circle provides infrastructure that helps power Arklake accounts and payments behind the scenes.',
+    tone: 'gold',
+    icon: '/brand/circle-icon.svg',
+  },
+  {
+    title: 'USDC',
+    subtitle: 'The currency used for payment.',
+    body: 'Send, receive and get paid in USDC through Arklake.',
+    tone: 'ink',
+    icon: '/brand/usdc-token.svg',
+  },
+]
+
+function InfrastructureSection() {
+  return (
+    <section id="infrastructure" className={`${shellWidth} pb-24 pt-2 lg:pb-32 lg:pt-0`}>
+      <div className="mx-auto max-w-3xl min-w-0 text-center">
+        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-arklake-aqua">Built for stablecoin payments</p>
+        <h2 className="mx-auto mt-4 max-w-[20rem] text-[2rem] font-semibold leading-[1.04] tracking-[-0.055em] text-arklake-ink sm:max-w-[44rem] sm:text-5xl">
+          Simple on the surface.<br className="hidden sm:block" /> Powerful underneath.
+        </h2>
+        <p className="mx-auto mt-4 max-w-[20rem] text-base leading-7 text-slate sm:max-w-[43rem] sm:text-lg sm:leading-8">
+          Arklake brings together infrastructure from Arc and Circle to make USDC payments feel simple — without exposing the complexity behind every transaction.
+        </p>
+      </div>
+
+      <div className="mt-12 grid w-full min-w-0 grid-cols-1 gap-5 md:grid-cols-3 lg:mt-14 lg:gap-6">
+        {infrastructureCards.map((card) => {
+          const isGold = card.tone === 'gold'
+          const isAqua = card.tone === 'aqua'
+
+          return (
+            <article key={card.title} className="flex min-w-0 flex-col rounded-[2rem] border border-lake-border bg-surface p-6 shadow-[0_18px_54px_rgba(20,33,39,0.07)] sm:p-7">
+              <div className={`flex h-11 w-11 items-center justify-center rounded-2xl ${isGold ? 'border border-arklake-gold/35 bg-arklake-gold/10 text-arklake-ink' : isAqua ? 'border border-arklake-aqua/30 bg-aqua-mist text-arklake-aqua' : 'border border-lake-border bg-lake-canvas text-arklake-ink'}`}>
+                <img className="h-6 w-6 object-contain" src={card.icon} alt="" aria-hidden="true" />
+              </div>
+              <h3 className="mt-6 text-2xl font-semibold tracking-[-0.04em] text-arklake-ink">{card.title}</h3>
+              <p className="mt-2 text-sm font-semibold leading-6 text-deep-text">{card.subtitle}</p>
+              <p className="mt-4 text-sm leading-6 text-slate md:min-h-[4.5rem]">{card.body}</p>
+            </article>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
+
 export default function App() {
   return (
     <main className="min-h-screen bg-lake-canvas text-deep-text">
@@ -482,6 +540,7 @@ export default function App() {
       <FeaturesSection />
       <ProductPreviewSection />
       <HowItWorksSection />
+      <InfrastructureSection />
     </main>
   )
 }
