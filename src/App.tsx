@@ -464,6 +464,85 @@ function InfrastructureSection() {
   )
 }
 
+function FinalCtaVisual() {
+  return (
+    <div className="relative mx-auto w-full min-w-0 max-w-[520px] lg:ml-auto lg:mr-0" aria-label="Arklake payment confirmation visual">
+      <div className="relative rounded-[2rem] border border-lake-border bg-surface p-4 shadow-[0_30px_86px_rgba(20,33,39,0.12)] sm:rounded-[2.4rem] sm:p-5">
+        <div className="rounded-[1.7rem] border border-lake-border bg-lake-canvas p-4 sm:p-6">
+          <div className="rounded-[1.5rem] border border-lake-border bg-surface p-5 shadow-[0_16px_42px_rgba(20,33,39,0.07)] sm:p-6">
+            <div className="flex min-w-0 items-center justify-between gap-4">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-arklake-ink">Invoice sent</p>
+                <p className="mt-2 text-2xl font-semibold tracking-[-0.05em] text-arklake-ink sm:text-3xl">250.00 USDC</p>
+              </div>
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-arklake-gold/35 bg-arklake-gold/10 text-arklake-ink">
+                <svg className="h-5 w-5" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                  <path d="M6 3.75h8A1.25 1.25 0 0 1 15.25 5v10.75L13 14.5l-2.25 1.25L8.5 14.5l-2.25 1.25V5A1.25 1.25 0 0 1 7.5 3.75Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+                  <path d="M8.25 7.5h3.5M8.25 10.25h2.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                </svg>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 px-3 py-4" aria-hidden="true">
+            <span className="h-px flex-1 bg-arklake-aqua/25" />
+            <span className="flex h-10 w-10 items-center justify-center rounded-full border border-arklake-aqua/45 bg-aqua-mist text-arklake-aqua shadow-[0_0_0_7px_rgba(50,199,193,0.10)]">
+              <svg className="h-4.5 w-4.5" viewBox="0 0 16 16" fill="none">
+                <path d="M4 8.2 6.7 10.8 12 5.25" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </span>
+            <span className="h-px flex-1 bg-arklake-aqua/25" />
+          </div>
+
+          <div className="rounded-[1.5rem] border border-arklake-aqua/25 bg-surface p-5 shadow-[0_16px_42px_rgba(20,33,39,0.07)] sm:p-6">
+            <div className="flex min-w-0 items-center justify-between gap-4">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-arklake-ink">Payment received</p>
+                <p className="mt-2 text-2xl font-semibold tracking-[-0.05em] text-arklake-ink sm:text-3xl">250.00 USDC</p>
+              </div>
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-arklake-aqua/30 bg-aqua-mist text-arklake-aqua">
+                <svg className="h-5 w-5" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                  <path d="M4 10.5V13a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-2.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                  <path d="M10 4.5v7M7.25 8.75 10 11.5l2.75-2.75" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function FinalCtaSection() {
+  return (
+    <section id="final-cta" className={`${shellWidth} pb-24 pt-2 lg:pb-32 lg:pt-0`}>
+      <div className="grid min-w-0 grid-cols-1 items-center gap-10 rounded-[2.1rem] border border-lake-border bg-surface p-6 shadow-[0_28px_88px_rgba(20,33,39,0.10)] sm:rounded-[2.6rem] sm:p-8 lg:grid-cols-[0.95fr_1.05fr] lg:gap-12 lg:p-10">
+        <div className="min-w-0 max-w-[560px]">
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-arklake-aqua">Ready to get started?</p>
+          <h2 className="mt-4 max-w-[20rem] text-[2rem] font-semibold leading-[1.04] tracking-[-0.055em] text-arklake-ink sm:max-w-[36rem] sm:text-5xl">
+            Start accepting and paying with USDC.
+          </h2>
+          <p className="mt-4 max-w-[20rem] text-base leading-7 text-slate sm:max-w-[34rem] sm:text-lg sm:leading-8">
+            Create your Arklake account to send invoices, receive payments and pay with USDC.
+          </p>
+
+          <div className="mt-8 flex w-full flex-col gap-3 sm:w-auto sm:flex-row">
+            <a className="inline-flex w-full items-center justify-center rounded-full bg-arklake-ink px-6 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-deep-text hover:ring-4 hover:ring-arklake-aqua/15 sm:w-auto" href="#">
+              Get started
+            </a>
+            <a className="inline-flex w-full items-center justify-center rounded-full border border-lake-border bg-surface px-6 py-3 text-sm font-semibold text-arklake-ink transition hover:border-arklake-aqua sm:w-auto" href="#">
+              Sign in
+            </a>
+          </div>
+        </div>
+
+        <FinalCtaVisual />
+      </div>
+    </section>
+  )
+}
+
 export default function App() {
   return (
     <main className="min-h-screen bg-lake-canvas text-deep-text">
@@ -541,6 +620,7 @@ export default function App() {
       <ProductPreviewSection />
       <HowItWorksSection />
       <InfrastructureSection />
+      <FinalCtaSection />
     </main>
   )
 }
