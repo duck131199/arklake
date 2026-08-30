@@ -1818,12 +1818,10 @@ export default function App() {
   const [isMobileProductOpen, setIsMobileProductOpen] = useState(false)
 
   useEffect(() => {
-    if (window.location.pathname !== '/') return
-
     window.history.scrollRestoration = 'manual'
 
     const pendingLandingScroll = window.sessionStorage.getItem(pendingLandingScrollKey)
-    if (pendingLandingScroll) {
+    if (window.location.pathname === '/' && pendingLandingScroll) {
       window.sessionStorage.removeItem(pendingLandingScrollKey)
       window.requestAnimationFrame(() => scrollToLandingSection(pendingLandingScroll))
       return
