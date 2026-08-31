@@ -1813,6 +1813,623 @@ function AboutPage() {
   )
 }
 
+const appNavItems = [
+  ['Home', '/app/icons/nav-home.svg'],
+  ['Invoices', '/app/icons/nav-invoices.svg'],
+  ['Wallet', '/app/icons/nav-wallet.svg'],
+  ['Swap', '/app/icons/nav-swap.svg'],
+  ['Account', '/app/icons/nav-account.svg'],
+]
+
+function AppIcon({ src }: { src: string }) {
+  return (
+    <span
+      className="h-5 w-5 shrink-0 bg-current"
+      style={{
+        mask: `url(${src}) center / contain no-repeat`,
+        WebkitMask: `url(${src}) center / contain no-repeat`,
+      }}
+      aria-hidden="true"
+    />
+  )
+}
+
+function AppSidebar({ activeItem = 'Home' }: { activeItem?: string }) {
+  return (
+    <aside className="hidden min-h-screen w-[272px] shrink-0 flex-col border-r border-lake-border bg-surface px-6 py-7 lg:flex">
+      <a href="/app" className="flex h-10 items-center text-arklake-ink" aria-label="Arklake app home">
+        <ProductMark />
+      </a>
+
+      <nav className="mt-9 flex flex-1 flex-col gap-1.5 text-sm font-semibold text-slate" aria-label="App navigation">
+        {appNavItems.map(([item, icon]) => {
+          const isActive = item === activeItem
+          const href = item === 'Home' ? '/app' : `/app/${item.toLowerCase()}`
+
+          return (
+            <a
+              key={item}
+              className={`flex items-center gap-3 rounded-2xl px-4 py-3.5 transition ${
+                isActive ? 'bg-aqua-mist text-arklake-ink shadow-sm' : 'text-slate'
+              }`}
+              href={href}
+            >
+              <AppIcon src={icon} />
+              {item}
+            </a>
+          )
+        })}
+      </nav>
+    </aside>
+  )
+}
+
+function AppHeader({ title = 'Home', subtitle = 'Your account overview.' }: { title?: string; subtitle?: string }) {
+  return (
+    <header className="flex min-w-0 flex-col gap-4 border-b border-lake-border bg-lake-canvas px-4 py-5 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:px-10 lg:py-7">
+      <div className="min-w-0">
+        <h1 className="text-3xl font-semibold tracking-[-0.055em] text-arklake-ink">{title}</h1>
+        <p className="mt-1 text-sm leading-6 text-slate">{subtitle}</p>
+      </div>
+
+      <div className="flex w-full flex-wrap items-center gap-3 lg:w-auto lg:shrink-0">
+        <button type="button" className="flex flex-1 items-center justify-center rounded-full bg-arklake-ink px-5 py-2.5 text-sm font-semibold text-white shadow-sm sm:flex-none">
+          + Create invoice
+        </button>
+        <button type="button" className="flex h-10 w-10 items-center justify-center rounded-full border border-lake-border bg-surface text-arklake-ink shadow-sm" aria-label="Notifications">
+          <svg className="h-4.5 w-4.5" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <path d="M15 8.5a5 5 0 0 0-10 0c0 4-1.5 5-1.5 5h13S15 12.5 15 8.5Z" stroke="currentColor" strokeWidth="1.55" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M8.4 16a1.8 1.8 0 0 0 3.2 0" stroke="currentColor" strokeWidth="1.55" strokeLinecap="round" />
+          </svg>
+        </button>
+        <button type="button" className="flex items-center gap-2 rounded-full border border-lake-border bg-surface py-1.5 pl-1.5 pr-3 text-sm font-semibold text-arklake-ink shadow-sm" aria-label="Account menu">
+          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-aqua-mist text-sm font-semibold text-arklake-aqua">D</span>
+          <svg className="h-3.5 w-3.5 text-slate" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+            <path d="M3 4.5 6 7.5l3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+      </div>
+    </header>
+  )
+}
+
+function AppMobileNav({ activeItem }: { activeItem: string }) {
+  return (
+    <div className="border-b border-lake-border bg-surface px-4 py-4 sm:px-6 lg:hidden">
+      <a href="/app" className="flex h-9 items-center text-arklake-ink" aria-label="Arklake app home">
+        <ProductMark />
+      </a>
+
+      <nav className="mt-4 flex flex-wrap gap-2 text-sm font-semibold text-slate" aria-label="Mobile app navigation">
+        {appNavItems.map(([item, icon]) => {
+          const isActive = item === activeItem
+          const href = item === 'Home' ? '/app' : `/app/${item.toLowerCase()}`
+
+          return (
+            <a
+              key={item}
+              className={`flex shrink-0 items-center gap-2 rounded-full px-3 py-2.5 transition sm:px-3.5 ${
+                isActive ? 'bg-aqua-mist text-arklake-ink shadow-sm' : 'border border-lake-border bg-lake-canvas text-slate'
+              }`}
+              href={href}
+            >
+              <AppIcon src={icon} />
+              {item}
+            </a>
+          )
+        })}
+      </nav>
+    </div>
+  )
+}
+
+function AppShell({ activeItem, title, subtitle, children }: { activeItem: string; title: string; subtitle: string; children: React.ReactNode }) {
+  return (
+    <main className="min-h-screen bg-lake-canvas text-deep-text">
+      <div className="flex min-h-screen min-w-0 flex-col lg:flex-row">
+        <AppSidebar activeItem={activeItem} />
+        <section className="flex min-w-0 flex-1 flex-col">
+          <AppMobileNav activeItem={activeItem} />
+          <AppHeader title={title} subtitle={subtitle} />
+          <div className="min-w-0 flex-1 px-4 py-5 sm:px-6 lg:px-10 lg:py-8">
+            {children}
+          </div>
+        </section>
+      </div>
+    </main>
+  )
+}
+
+function AppHomePage() {
+  return (
+    <AppShell activeItem="Home" title="Home" subtitle="Your account overview.">
+      <section className="grid gap-6 xl:grid-cols-[minmax(0,1.05fr)_minmax(340px,0.62fr)]">
+              <div className="rounded-[2rem] border border-lake-border bg-surface p-6 shadow-sm">
+                <div className="flex min-h-[224px] flex-col items-start justify-between gap-6 overflow-hidden rounded-[1.5rem] bg-gradient-to-br from-white to-aqua-mist/60 px-6 py-6 sm:px-8 lg:flex-row lg:items-center lg:gap-7">
+                  <div className="relative z-10 min-w-0">
+                    <p className="text-sm font-semibold text-slate">Available to pay</p>
+                    <p className="mt-5 whitespace-nowrap text-[2.65rem] font-semibold leading-none tracking-[-0.065em] text-arklake-ink sm:text-5xl">0.00 USDC</p>
+                    <p className="mt-3 text-sm font-medium text-slate">≈ $0.00 USD</p>
+                  </div>
+                  <img
+                    className="mx-auto h-auto w-full max-w-[260px] shrink-0 object-contain sm:max-w-[310px] lg:h-[190px] lg:w-[310px]"
+                    src="/app/illustrations/wallet-hero.svg"
+                    alt=""
+                    aria-hidden="true"
+                  />
+                </div>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
+                <div className="min-h-[148px] rounded-[1.75rem] border border-lake-border bg-surface p-5 shadow-sm">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-full bg-aqua-mist text-arklake-aqua">
+                    <svg className="h-5 w-5" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                      <path d="M10 4.5v10M6.25 10.75 10 14.5l3.75-3.75" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </div>
+                  <h2 className="mt-4 text-xl font-semibold tracking-[-0.04em] text-arklake-ink">Receive</h2>
+                  <p className="mt-1 text-sm leading-6 text-slate">Get paid by anyone</p>
+                </div>
+
+                <div className="min-h-[148px] rounded-[1.75rem] border border-aqua-mist bg-aqua-mist p-5 shadow-sm">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-full bg-white text-arklake-aqua">
+                    <svg className="h-5 w-5" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                      <path d="M10 15.5v-10M6.25 9.25 10 5.5l3.75 3.75" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </div>
+                  <h2 className="mt-4 text-xl font-semibold tracking-[-0.04em] text-arklake-ink">Send</h2>
+                  <p className="mt-1 text-sm leading-6 text-slate">Pay anyone</p>
+                </div>
+              </div>
+            </section>
+
+            <section className="mt-6 rounded-[2rem] border border-lake-border bg-surface p-6 shadow-sm">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-semibold tracking-[-0.04em] text-arklake-ink">Invoices</h2>
+                <button type="button" className="text-sm font-semibold text-arklake-aqua">View all</button>
+              </div>
+
+              <div className="flex min-h-[276px] flex-col items-center justify-center px-6 py-8 text-center">
+                <img
+                  className="h-[154px] w-[206px] object-contain"
+                  src="/app/illustrations/invoice-empty.svg"
+                  alt=""
+                  aria-hidden="true"
+                />
+                <h3 className="mt-3 text-2xl font-semibold tracking-[-0.05em] text-arklake-ink">No invoices yet</h3>
+                <p className="mt-2 max-w-sm text-sm leading-6 text-slate">
+                  Create an invoice and request payment from anyone by email.
+                </p>
+                <button type="button" className="mt-5 rounded-full bg-arklake-ink px-5 py-2.5 text-sm font-semibold text-white shadow-sm">
+                  + Create invoice
+                </button>
+              </div>
+            </section>
+    </AppShell>
+  )
+}
+
+type InvoiceStatus = 'Draft' | 'Unpaid' | 'Verifying' | 'Paid'
+
+const appInvoices: { invoice: string; recipient: string; amount: string; date: string; status: InvoiceStatus }[] = [
+  { invoice: 'INV-1042', recipient: 'client@example.com', amount: '250.00 USDC', date: 'Aug 30, 2026', status: 'Unpaid' },
+  { invoice: 'INV-1041', recipient: 'alice@example.com', amount: '80.00 USDC', date: 'Aug 29, 2026', status: 'Verifying' },
+  { invoice: 'INV-1040', recipient: 'bob@example.com', amount: '500.00 USDC', date: 'Aug 27, 2026', status: 'Paid' },
+  { invoice: 'INV-1039', recipient: 'partner@example.com', amount: '120.00 USDC', date: 'Aug 25, 2026', status: 'Draft' },
+  { invoice: 'INV-1038', recipient: 'studio@example.com', amount: '360.00 USDC', date: 'Aug 22, 2026', status: 'Paid' },
+]
+
+function InvoiceStatusBadge({ status }: { status: InvoiceStatus }) {
+  const statusClassNames: Record<InvoiceStatus, string> = {
+    Draft: 'border-slate/15 bg-slate/5 text-slate',
+    Unpaid: 'border-amber-200 bg-amber-50 text-amber-700',
+    Verifying: 'border-sky-200 bg-sky-50 text-sky-700',
+    Paid: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+  }
+
+  return (
+    <span className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${statusClassNames[status]}`}>
+      {status}
+    </span>
+  )
+}
+
+function AppInvoicesPage() {
+  return (
+    <AppShell activeItem="Invoices" title="Invoices" subtitle="Create, receive and track payments.">
+      <section className="rounded-[2rem] border border-lake-border bg-surface p-6 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-lake-border pb-5">
+          <div className="inline-flex rounded-full border border-lake-border bg-lake-canvas p-1 text-sm font-semibold text-slate">
+            <button type="button" className="rounded-full bg-surface px-5 py-2 text-arklake-ink shadow-sm">
+              Sent
+            </button>
+            <button type="button" className="rounded-full px-5 py-2">
+              Received
+            </button>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <button type="button" className="inline-flex items-center gap-2 rounded-full border border-lake-border bg-surface px-4 py-2.5 text-sm font-semibold text-slate shadow-sm">
+              Status
+              <svg className="h-3.5 w-3.5" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                <path d="M3 4.5 6 7.5l3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+            <button type="button" className="inline-flex items-center gap-2 rounded-full border border-lake-border bg-surface px-4 py-2.5 text-sm font-semibold text-slate shadow-sm">
+              Date
+              <svg className="h-3.5 w-3.5" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                <path d="M3 4.5 6 7.5l3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+            <label className="flex min-w-[260px] items-center gap-2 rounded-full border border-lake-border bg-surface px-4 py-2.5 text-sm text-slate shadow-sm">
+              <svg className="h-4 w-4 shrink-0" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                <path d="m14.5 14.5 2.5 2.5M8.75 15a6.25 6.25 0 1 0 0-12.5 6.25 6.25 0 0 0 0 12.5Z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+              </svg>
+              <input className="min-w-0 flex-1 bg-transparent text-sm font-medium outline-none placeholder:text-slate" placeholder="Search invoices" aria-label="Search invoices" />
+            </label>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-3 lg:hidden">
+          {appInvoices.map((invoice) => (
+            <article key={invoice.invoice} className="rounded-[1.5rem] border border-lake-border bg-surface px-4 py-4 shadow-sm">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-semibold text-arklake-ink">{invoice.invoice}</h3>
+                    <svg className="h-4 w-4 shrink-0 text-slate" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                      <path d="m6 4 4 4-4 4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </div>
+                  <p className="mt-1 break-words text-sm font-medium text-slate">{invoice.recipient}</p>
+                </div>
+                <InvoiceStatusBadge status={invoice.status} />
+              </div>
+
+              <div className="mt-4 flex items-end justify-between gap-3">
+                <p className="font-semibold text-arklake-ink">{invoice.amount}</p>
+                <p className="shrink-0 text-sm font-medium text-slate">{invoice.date}</p>
+              </div>
+            </article>
+          ))}
+        </div>
+
+        <div className="mt-4 hidden overflow-hidden rounded-[1.5rem] border border-lake-border lg:block">
+          <table className="w-full min-w-[760px] border-collapse text-left text-sm">
+            <thead className="bg-lake-canvas text-xs font-semibold uppercase tracking-[0.14em] text-slate">
+              <tr>
+                <th className="px-5 py-4">Invoice</th>
+                <th className="px-5 py-4">Recipient</th>
+                <th className="px-5 py-4">Amount</th>
+                <th className="px-5 py-4">Date</th>
+                <th className="px-5 py-4">Status</th>
+                <th className="w-12 px-5 py-4" aria-label="Actions" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-lake-border bg-surface">
+              {appInvoices.map((invoice) => (
+                <tr key={invoice.invoice} className="transition hover:bg-aqua-mist/30">
+                  <td className="px-5 py-5 font-semibold text-arklake-ink">{invoice.invoice}</td>
+                  <td className="px-5 py-5 font-medium text-slate">{invoice.recipient}</td>
+                  <td className="px-5 py-5 font-semibold text-arklake-ink">{invoice.amount}</td>
+                  <td className="px-5 py-5 font-medium text-slate">{invoice.date}</td>
+                  <td className="px-5 py-5"><InvoiceStatusBadge status={invoice.status} /></td>
+                  <td className="px-5 py-5 text-right text-slate">
+                    <svg className="ml-auto h-4 w-4" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                      <path d="m6 4 4 4-4 4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </AppShell>
+  )
+}
+
+const walletAssets = [
+  { symbol: 'USDC', name: 'USD Coin', amount: '320.00', value: '≈ $320.00', icon: '/brand/usdc-token.svg' },
+  { symbol: 'EURC', name: 'Euro Coin', amount: '120.00', value: '≈ $130.00', icon: '/brand/eurc-token.png' },
+  { symbol: 'CIRBTC', name: 'Circle BTC', amount: '0.0005', value: '≈ $50.00', icon: '/brand/cirbtc-token.png' },
+]
+
+const walletActivity = [
+  { type: 'Received', amount: '+250.00 USDC', date: 'Aug 30, 2026' },
+  { type: 'Sent', amount: '-80.00 USDC', date: 'Aug 29, 2026' },
+  { type: 'Swap', amount: '100 EURC → 108 USDC', date: 'Aug 28, 2026' },
+  { type: 'Invoice payment', amount: '-120.00 USDC', date: 'Aug 27, 2026' },
+]
+
+function TokenIcon({ symbol, icon }: { symbol: string; icon?: string }) {
+  if (icon) {
+    return <img className="h-10 w-10 rounded-full" src={icon} alt="" aria-hidden="true" />
+  }
+
+  return (
+    <span className="flex h-10 w-10 items-center justify-center rounded-full bg-aqua-mist text-xs font-semibold text-arklake-aqua" aria-hidden="true">
+      {symbol.slice(0, 2)}
+    </span>
+  )
+}
+
+function AppWalletPage() {
+  return (
+    <AppShell activeItem="Wallet" title="Wallet" subtitle="Your money in Arklake.">
+      <section className="grid gap-6 xl:grid-cols-[minmax(0,1.05fr)_minmax(340px,0.62fr)]">
+        <div className="rounded-[2rem] border border-lake-border bg-surface p-6 shadow-sm">
+          <div className="flex min-h-[224px] flex-col items-start justify-between gap-6 overflow-hidden rounded-[1.5rem] bg-gradient-to-br from-white to-aqua-mist/60 px-6 py-6 sm:px-8 lg:flex-row lg:items-center lg:gap-7">
+            <div className="relative z-10 min-w-0">
+              <p className="text-sm font-semibold text-slate">Available to pay</p>
+              <p className="mt-5 whitespace-nowrap text-[2.35rem] font-semibold leading-none tracking-[-0.065em] text-arklake-ink sm:text-5xl">320.00 USDC</p>
+              <p className="mt-3 text-sm font-medium text-slate">≈ $320.00 USD</p>
+            </div>
+            <img className="mx-auto h-auto w-full max-w-[260px] shrink-0 object-contain sm:max-w-[310px] lg:h-[190px] lg:w-[310px]" src="/app/illustrations/wallet-hero.svg" alt="" aria-hidden="true" />
+          </div>
+        </div>
+
+        <div className="grid gap-4 xl:grid-cols-1">
+          <div className="rounded-[1.75rem] border border-lake-border bg-surface p-5 shadow-sm">
+            <p className="text-sm font-semibold text-slate">Total assets</p>
+            <p className="mt-4 text-3xl font-semibold tracking-[-0.055em] text-arklake-ink">≈ $500.00 USD</p>
+            <p className="mt-2 text-sm leading-6 text-slate">Across demo wallet assets</p>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-2">
+            <div className="min-h-[128px] rounded-[1.75rem] border border-lake-border bg-surface p-5 shadow-sm">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-aqua-mist text-arklake-aqua">
+                <svg className="h-5 w-5" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                  <path d="M10 4.5v10M6.25 10.75 10 14.5l3.75-3.75" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </div>
+              <h2 className="mt-4 text-lg font-semibold tracking-[-0.04em] text-arklake-ink">Receive</h2>
+              <p className="mt-1 text-sm leading-6 text-slate">Get paid by anyone</p>
+            </div>
+
+            <div className="min-h-[128px] rounded-[1.75rem] border border-aqua-mist bg-aqua-mist p-5 shadow-sm">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white text-arklake-aqua">
+                <svg className="h-5 w-5" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                  <path d="M10 15.5v-10M6.25 9.25 10 5.5l3.75 3.75" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </div>
+              <h2 className="mt-4 text-lg font-semibold tracking-[-0.04em] text-arklake-ink">Send</h2>
+              <p className="mt-1 text-sm leading-6 text-slate">Pay anyone</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
+        <div className="rounded-[2rem] border border-lake-border bg-surface p-6 shadow-sm">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-semibold tracking-[-0.04em] text-arklake-ink">Assets</h2>
+            <button type="button" className="text-sm font-semibold text-arklake-aqua">View all assets</button>
+          </div>
+
+          <div className="mt-5 divide-y divide-lake-border">
+            {walletAssets.map((asset) => (
+              <div key={asset.symbol} className="flex items-center justify-between gap-3 py-4 first:pt-0 last:pb-0 sm:gap-4">
+                <div className="flex min-w-0 items-center gap-3">
+                  <TokenIcon symbol={asset.symbol} icon={asset.icon} />
+                  <div className="min-w-0">
+                    <p className="font-semibold text-arklake-ink">{asset.symbol}</p>
+                    <p className="mt-1 text-sm text-slate">{asset.name}</p>
+                  </div>
+                </div>
+                <div className="shrink-0 text-right">
+                  <p className="font-semibold text-arklake-ink">{asset.amount}</p>
+                  <p className="mt-1 text-sm text-slate">{asset.value}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="rounded-[2rem] border border-lake-border bg-surface p-6 shadow-sm">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-semibold tracking-[-0.04em] text-arklake-ink">Recent activity</h2>
+            <button type="button" className="text-sm font-semibold text-arklake-aqua">View all activity</button>
+          </div>
+
+          <div className="mt-5 divide-y divide-lake-border">
+            {walletActivity.map((activity) => (
+              <div key={`${activity.type}-${activity.date}`} className="flex flex-col gap-2 py-4 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+                <div className="min-w-0">
+                  <p className="font-semibold text-arklake-ink">{activity.type}</p>
+                  <p className="mt-1 text-sm text-slate">{activity.date}</p>
+                </div>
+                <p className="font-semibold text-arklake-ink sm:shrink-0 sm:text-right">{activity.amount}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+    </AppShell>
+  )
+}
+
+function SwapTokenSelector({ symbol, icon }: { symbol: string; icon: string }) {
+  return (
+    <button type="button" className="inline-flex shrink-0 items-center gap-2 rounded-full border border-lake-border bg-surface py-1.5 pl-2 pr-3 text-sm font-semibold text-arklake-ink shadow-sm">
+      <img className="h-7 w-7 rounded-full" src={icon} alt="" aria-hidden="true" />
+      {symbol}
+      <svg className="h-3.5 w-3.5 text-slate" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+        <path d="M3 4.5 6 7.5l3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </button>
+  )
+}
+
+function AppSwapPage() {
+  return (
+    <AppShell activeItem="Swap" title="Swap" subtitle="Convert your assets.">
+      <section className="grid gap-6 lg:grid-cols-[minmax(0,0.92fr)_minmax(340px,0.48fr)]">
+        <div className="rounded-[2rem] border border-lake-border bg-surface p-5 shadow-sm sm:p-6">
+          <div className="mb-5 flex items-center justify-between gap-3">
+            <h2 className="text-xl font-semibold tracking-[-0.04em] text-arklake-ink">Swap assets</h2>
+            <span className="rounded-full border border-aqua-mist bg-aqua-mist px-3 py-1.5 text-xs font-semibold text-arklake-ink">Demo quote</span>
+          </div>
+
+          <div className="rounded-[1.5rem] border border-lake-border bg-lake-canvas p-5">
+            <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-slate">You pay</p>
+                <p className="mt-4 text-4xl font-semibold tracking-[-0.065em] text-arklake-ink sm:text-5xl">100.00</p>
+                <div className="mt-4 flex items-center gap-3 text-sm text-slate">
+                  <span>Balance: 120.00 EURC</span>
+                  <button type="button" className="font-semibold text-arklake-aqua">Max</button>
+                </div>
+              </div>
+              <SwapTokenSelector symbol="EURC" icon="/brand/eurc-token.png" />
+            </div>
+          </div>
+
+          <div className="relative flex justify-center py-3">
+            <button type="button" className="flex h-11 w-11 items-center justify-center rounded-full border border-lake-border bg-surface text-arklake-aqua shadow-sm" aria-label="Reverse swap direction">
+              <svg className="h-5 w-5" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                <path d="M10 4.5v11M6.5 12 10 15.5 13.5 12" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+          </div>
+
+          <div className="rounded-[1.5rem] border border-aqua-mist bg-aqua-mist p-5">
+            <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-slate">You receive</p>
+                <p className="mt-4 text-4xl font-semibold tracking-[-0.065em] text-arklake-ink sm:text-5xl">108.00</p>
+                <p className="mt-4 text-sm font-medium text-slate">Estimated</p>
+              </div>
+              <SwapTokenSelector symbol="USDC" icon="/brand/usdc-token.svg" />
+            </div>
+          </div>
+
+          <div className="mt-5 rounded-[1.5rem] border border-lake-border bg-surface px-5 py-4">
+            <div className="flex flex-col gap-1 py-2 text-sm sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+              <span className="text-slate">Rate</span>
+              <span className="font-semibold text-arklake-ink">1 EURC ≈ 1.08 USDC</span>
+            </div>
+            <div className="flex flex-col gap-1 py-2 text-sm sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+              <span className="text-slate">Fee</span>
+              <span className="font-semibold text-arklake-ink">≈ 0.10 USDC</span>
+            </div>
+            <div className="flex flex-col gap-1 border-t border-lake-border pt-4 text-sm sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+              <span className="text-slate">Estimated received</span>
+              <span className="font-semibold text-arklake-ink">≈ 107.90 USDC</span>
+            </div>
+          </div>
+
+          <button type="button" className="mt-6 w-full rounded-full bg-arklake-ink px-6 py-3 text-sm font-semibold text-white shadow-sm">
+            Review swap
+          </button>
+        </div>
+
+        <aside className="rounded-[2rem] border border-lake-border bg-surface p-6 shadow-sm">
+          <div className="flex flex-col justify-between overflow-hidden rounded-[1.5rem] bg-gradient-to-br from-white to-aqua-mist/60 p-6 lg:min-h-[220px]">
+            <div>
+              <p className="text-sm font-semibold text-arklake-aqua">Invoice payments</p>
+              <h2 className="mt-4 text-3xl font-semibold leading-[1.05] tracking-[-0.055em] text-arklake-ink">Need USDC to pay an invoice?</h2>
+              <p className="mt-4 text-sm leading-6 text-slate">Swap another supported asset to USDC before paying.</p>
+            </div>
+            <a href="/app/invoices" className="mt-8 inline-flex w-fit items-center justify-center rounded-full border border-lake-border bg-surface px-5 py-2.5 text-sm font-semibold text-arklake-ink shadow-sm">
+              View invoices
+            </a>
+          </div>
+        </aside>
+      </section>
+    </AppShell>
+  )
+}
+
+function AccountRow({ label, value, detail }: { label: string; value: string; detail?: string }) {
+  return (
+    <div className="flex flex-col items-start gap-3 py-4 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+      <div className="min-w-0">
+        <p className="text-sm font-semibold text-slate">{label}</p>
+        <p className="mt-1 break-words font-semibold text-arklake-ink">{value}</p>
+      </div>
+      {detail ? <span className="shrink-0 rounded-full border border-aqua-mist bg-aqua-mist px-3 py-1 text-xs font-semibold text-arklake-ink">{detail}</span> : null}
+    </div>
+  )
+}
+
+function SecurityRow({ label, status }: { label: string; status: string }) {
+  const isComingLater = status === 'Coming later'
+
+  return (
+    <div className="flex items-center justify-between gap-3 py-4 first:pt-0 last:pb-0 sm:gap-4">
+      <p className="font-semibold text-arklake-ink">{label}</p>
+      <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${isComingLater ? 'border-lake-border bg-lake-canvas text-slate' : 'border-aqua-mist bg-aqua-mist text-arklake-ink'}`}>
+        {status}
+      </span>
+    </div>
+  )
+}
+
+function AppAccountPage() {
+  return (
+    <AppShell activeItem="Account" title="Account" subtitle="Manage your profile, wallet and security.">
+      <section className="grid gap-6 lg:grid-cols-[minmax(0,0.95fr)_minmax(340px,0.58fr)]">
+        <div className="grid gap-6">
+          <section className="rounded-[2rem] border border-lake-border bg-surface p-6 shadow-sm">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-semibold tracking-[-0.04em] text-arklake-ink">Profile</h2>
+              <button type="button" className="text-sm font-semibold text-arklake-aqua">Edit</button>
+            </div>
+            <div className="mt-5 divide-y divide-lake-border">
+              <AccountRow label="Email" value="duck@example.com" detail="Verified" />
+              <AccountRow label="Arklake Name" value="@duck" />
+            </div>
+          </section>
+
+          <section className="rounded-[2rem] border border-lake-border bg-surface p-6 shadow-sm">
+            <div className="flex flex-col items-start justify-between gap-6 overflow-hidden rounded-[1.5rem] bg-gradient-to-br from-white to-aqua-mist/60 p-6 lg:flex-row">
+              <div className="min-w-0 flex-1">
+                <h2 className="text-xl font-semibold tracking-[-0.04em] text-arklake-ink">Wallet</h2>
+                <p className="mt-5 text-sm font-semibold text-slate">Wallet address</p>
+                <p className="mt-2 text-xl font-semibold tracking-[-0.05em] text-arklake-ink sm:text-2xl">0xB1f9...446e</p>
+                <div className="mt-5 flex flex-wrap gap-3">
+                  <button type="button" className="inline-flex items-center gap-2 rounded-full border border-lake-border bg-surface px-4 py-2.5 text-sm font-semibold text-arklake-ink shadow-sm">
+                    <svg className="h-4 w-4 text-arklake-aqua" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                      <path d="M7 7V5.5A1.5 1.5 0 0 1 8.5 4h6A1.5 1.5 0 0 1 16 5.5v6A1.5 1.5 0 0 1 14.5 13H13M5.5 7h6A1.5 1.5 0 0 1 13 8.5v6a1.5 1.5 0 0 1-1.5 1.5h-6A1.5 1.5 0 0 1 4 14.5v-6A1.5 1.5 0 0 1 5.5 7Z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                    </svg>
+                    Copy
+                  </button>
+                  <button type="button" className="rounded-full border border-lake-border bg-surface px-4 py-2.5 text-sm font-semibold text-arklake-ink shadow-sm">
+                    View on explorer
+                  </button>
+                </div>
+              </div>
+              <img className="mx-auto h-auto w-full max-w-[220px] shrink-0 object-contain lg:h-[148px] lg:w-[190px]" src="/app/illustrations/wallet-hero.svg" alt="" aria-hidden="true" />
+            </div>
+          </section>
+        </div>
+
+        <div className="grid gap-6 content-start">
+          <section className="rounded-[2rem] border border-lake-border bg-surface p-6 shadow-sm">
+            <h2 className="text-xl font-semibold tracking-[-0.04em] text-arklake-ink">Security</h2>
+            <div className="mt-5 divide-y divide-lake-border">
+              <SecurityRow label="Email" status="Verified" />
+              <SecurityRow label="Passkey" status="Enabled" />
+              <SecurityRow label="2FA" status="Coming later" />
+            </div>
+          </section>
+
+          <section className="rounded-[2rem] border border-lake-border bg-surface p-6 shadow-sm">
+            <div className="rounded-[1.5rem] border border-lake-border bg-lake-canvas p-5">
+              <h2 className="text-xl font-semibold tracking-[-0.04em] text-arklake-ink">Sign out</h2>
+              <p className="mt-2 text-sm leading-6 text-slate">End this demo app session on this device.</p>
+              <button type="button" className="mt-5 rounded-full bg-arklake-ink px-5 py-2.5 text-sm font-semibold text-white shadow-sm">
+                Sign out
+              </button>
+            </div>
+          </section>
+        </div>
+      </section>
+    </AppShell>
+  )
+}
+
 export default function App() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const [isMobileProductOpen, setIsMobileProductOpen] = useState(false)
@@ -1829,6 +2446,26 @@ export default function App() {
 
     window.scrollTo(0, 0)
   }, [])
+
+  if (window.location.pathname === '/app') {
+    return <AppHomePage />
+  }
+
+  if (window.location.pathname === '/app/invoices') {
+    return <AppInvoicesPage />
+  }
+
+  if (window.location.pathname === '/app/wallet') {
+    return <AppWalletPage />
+  }
+
+  if (window.location.pathname === '/app/swap') {
+    return <AppSwapPage />
+  }
+
+  if (window.location.pathname === '/app/account') {
+    return <AppAccountPage />
+  }
 
   if (window.location.pathname === '/docs/getting-started') {
     return <GettingStartedPage />

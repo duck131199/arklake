@@ -1,0 +1,14 @@
+<svg width="260" height="200" viewBox="0 0 260 200" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect x="35" y="24" width="190" height="152" rx="38" fill="#EAFBF7"/>
+  <circle cx="205" cy="50" r="14" fill="#D9F7F0"/>
+  <circle cx="55" cy="158" r="10" fill="#D9F7F0"/>
+  <path d="M88 45h56l34 34v73c0 8.8-7.2 16-16 16H88c-8.8 0-16-7.2-16-16V61c0-8.8 7.2-16 16-16Z" fill="white" stroke="#173F3A" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M144 46v24c0 5 4 9 9 9h24" fill="#F4FFFC"/>
+  <path d="M144 46v24c0 5 4 9 9 9h24" stroke="#173F3A" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M95 101h59M95 122h50M95 143h36" stroke="#9AAEAA" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="158" cy="142" r="14" fill="#31D6B2"/>
+  <path d="M151.5 142h13" stroke="white" stroke-width="3.2" stroke-linecap="round"/>
+  <path d="M158 135.5v13" stroke="white" stroke-width="3.2" stroke-linecap="round"/>
+  <path d="M197 106c6.8-1.7 11-5.9 12.6-12.6 1.7 6.7 5.9 10.9 12.6 12.6-6.7 1.6-10.9 5.8-12.6 12.6-1.6-6.8-5.8-11-12.6-12.6Z" fill="#31D6B2" opacity=".75"/>
+  <path d="M49 76c4.6-1.1 7.4-4 8.5-8.5 1.1 4.5 3.9 7.4 8.5 8.5-4.6 1.1-7.4 3.9-8.5 8.5-1.1-4.6-3.9-7.4-8.5-8.5Z" fill="#31D6B2" opacity=".62"/>
+</svg>
