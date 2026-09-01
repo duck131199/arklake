@@ -1834,10 +1834,17 @@ function AppIcon({ src }: { src: string }) {
   )
 }
 
-function AppSidebar({ activeItem = 'Home' }: { activeItem?: string }) {
+type AppNavigateHandler = (path: string) => void
+
+function AppSidebar({ activeItem = 'Home', onNavigate }: { activeItem?: string; onNavigate: AppNavigateHandler }) {
+  const handleNavClick = (event: React.MouseEvent<HTMLAnchorElement>, href: string) => {
+    event.preventDefault()
+    onNavigate(href)
+  }
+
   return (
     <aside className="hidden min-h-screen w-[272px] shrink-0 flex-col border-r border-lake-border bg-surface px-6 py-7 lg:flex">
-      <a href="/app" className="flex h-10 items-center text-arklake-ink" aria-label="Arklake app home">
+      <a href="/app" className="flex h-10 items-center text-arklake-ink" aria-label="Arklake app home" onClick={(event) => handleNavClick(event, '/app')}>
         <ProductMark />
       </a>
 
@@ -1853,6 +1860,7 @@ function AppSidebar({ activeItem = 'Home' }: { activeItem?: string }) {
                 isActive ? 'bg-aqua-mist text-arklake-ink shadow-sm' : 'text-slate'
               }`}
               href={href}
+              onClick={(event) => handleNavClick(event, href)}
             >
               <AppIcon src={icon} />
               {item}
@@ -1864,7 +1872,7 @@ function AppSidebar({ activeItem = 'Home' }: { activeItem?: string }) {
   )
 }
 
-function AppHeader({ title = 'Home', subtitle = 'Your account overview.' }: { title?: string; subtitle?: string }) {
+function AppHeader({ title = 'Home', subtitle = 'Your account overview.', onNavigate }: { title?: string; subtitle?: string; onNavigate: AppNavigateHandler }) {
   return (
     <header className="flex min-w-0 flex-col gap-4 border-b border-lake-border bg-lake-canvas px-4 py-5 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:px-10 lg:py-7">
       <div className="min-w-0">
@@ -1873,9 +1881,12 @@ function AppHeader({ title = 'Home', subtitle = 'Your account overview.' }: { ti
       </div>
 
       <div className="flex w-full flex-wrap items-center gap-3 lg:w-auto lg:shrink-0">
-        <button type="button" className="flex flex-1 items-center justify-center rounded-full bg-arklake-ink px-5 py-2.5 text-sm font-semibold text-white shadow-sm sm:flex-none">
+        <a href="/app/invoices/create" className="flex flex-1 items-center justify-center rounded-full bg-arklake-ink px-5 py-2.5 text-sm font-semibold text-white shadow-sm sm:flex-none" onClick={(event) => {
+          event.preventDefault()
+          onNavigate('/app/invoices/create')
+        }}>
           + Create invoice
-        </button>
+        </a>
         <button type="button" className="flex h-10 w-10 items-center justify-center rounded-full border border-lake-border bg-surface text-arklake-ink shadow-sm" aria-label="Notifications">
           <svg className="h-4.5 w-4.5" viewBox="0 0 20 20" fill="none" aria-hidden="true">
             <path d="M15 8.5a5 5 0 0 0-10 0c0 4-1.5 5-1.5 5h13S15 12.5 15 8.5Z" stroke="currentColor" strokeWidth="1.55" strokeLinecap="round" strokeLinejoin="round" />
@@ -1893,10 +1904,15 @@ function AppHeader({ title = 'Home', subtitle = 'Your account overview.' }: { ti
   )
 }
 
-function AppMobileNav({ activeItem }: { activeItem: string }) {
+function AppMobileNav({ activeItem, onNavigate }: { activeItem: string; onNavigate: AppNavigateHandler }) {
+  const handleNavClick = (event: React.MouseEvent<HTMLAnchorElement>, href: string) => {
+    event.preventDefault()
+    onNavigate(href)
+  }
+
   return (
     <div className="border-b border-lake-border bg-surface px-4 py-4 sm:px-6 lg:hidden">
-      <a href="/app" className="flex h-9 items-center text-arklake-ink" aria-label="Arklake app home">
+      <a href="/app" className="flex h-9 items-center text-arklake-ink" aria-label="Arklake app home" onClick={(event) => handleNavClick(event, '/app')}>
         <ProductMark />
       </a>
 
@@ -1912,6 +1928,7 @@ function AppMobileNav({ activeItem }: { activeItem: string }) {
                 isActive ? 'bg-aqua-mist text-arklake-ink shadow-sm' : 'border border-lake-border bg-lake-canvas text-slate'
               }`}
               href={href}
+              onClick={(event) => handleNavClick(event, href)}
             >
               <AppIcon src={icon} />
               {item}
@@ -1923,14 +1940,14 @@ function AppMobileNav({ activeItem }: { activeItem: string }) {
   )
 }
 
-function AppShell({ activeItem, title, subtitle, children }: { activeItem: string; title: string; subtitle: string; children: React.ReactNode }) {
+function AppShell({ activeItem, title, subtitle, children, onNavigate }: { activeItem: string; title: string; subtitle: string; children: React.ReactNode; onNavigate: AppNavigateHandler }) {
   return (
     <main className="min-h-screen bg-lake-canvas text-deep-text">
       <div className="flex min-h-screen min-w-0 flex-col lg:flex-row">
-        <AppSidebar activeItem={activeItem} />
+        <AppSidebar activeItem={activeItem} onNavigate={onNavigate} />
         <section className="flex min-w-0 flex-1 flex-col">
-          <AppMobileNav activeItem={activeItem} />
-          <AppHeader title={title} subtitle={subtitle} />
+          <AppMobileNav activeItem={activeItem} onNavigate={onNavigate} />
+          <AppHeader title={title} subtitle={subtitle} onNavigate={onNavigate} />
           <div className="min-w-0 flex-1 px-4 py-5 sm:px-6 lg:px-10 lg:py-8">
             {children}
           </div>
@@ -1940,9 +1957,9 @@ function AppShell({ activeItem, title, subtitle, children }: { activeItem: strin
   )
 }
 
-function AppHomePage() {
+function AppHomePage({ onNavigate }: { onNavigate: AppNavigateHandler }) {
   return (
-    <AppShell activeItem="Home" title="Home" subtitle="Your account overview.">
+    <AppShell activeItem="Home" title="Home" subtitle="Your account overview." onNavigate={onNavigate}>
       <section className="grid gap-6 xl:grid-cols-[minmax(0,1.05fr)_minmax(340px,0.62fr)]">
               <div className="rounded-[2rem] border border-lake-border bg-surface p-6 shadow-sm">
                 <div className="flex min-h-[224px] flex-col items-start justify-between gap-6 overflow-hidden rounded-[1.5rem] bg-gradient-to-br from-white to-aqua-mist/60 px-6 py-6 sm:px-8 lg:flex-row lg:items-center lg:gap-7">
@@ -2000,24 +2017,122 @@ function AppHomePage() {
                 <p className="mt-2 max-w-sm text-sm leading-6 text-slate">
                   Create an invoice and request payment from anyone by email.
                 </p>
-                <button type="button" className="mt-5 rounded-full bg-arklake-ink px-5 py-2.5 text-sm font-semibold text-white shadow-sm">
+                <a href="/app/invoices/create" className="mt-5 rounded-full bg-arklake-ink px-5 py-2.5 text-sm font-semibold text-white shadow-sm" onClick={(event) => {
+                  event.preventDefault()
+                  onNavigate('/app/invoices/create')
+                }}>
                   + Create invoice
-                </button>
+                </a>
               </div>
             </section>
     </AppShell>
   )
 }
 
-type InvoiceStatus = 'Draft' | 'Unpaid' | 'Verifying' | 'Paid'
+type InvoiceStatus = 'Draft' | 'Unpaid' | 'Verifying' | 'Paid' | 'Expired'
 
-const appInvoices: { invoice: string; recipient: string; amount: string; date: string; status: InvoiceStatus }[] = [
-  { invoice: 'INV-1042', recipient: 'client@example.com', amount: '250.00 USDC', date: 'Aug 30, 2026', status: 'Unpaid' },
-  { invoice: 'INV-1041', recipient: 'alice@example.com', amount: '80.00 USDC', date: 'Aug 29, 2026', status: 'Verifying' },
-  { invoice: 'INV-1040', recipient: 'bob@example.com', amount: '500.00 USDC', date: 'Aug 27, 2026', status: 'Paid' },
-  { invoice: 'INV-1039', recipient: 'partner@example.com', amount: '120.00 USDC', date: 'Aug 25, 2026', status: 'Draft' },
-  { invoice: 'INV-1038', recipient: 'studio@example.com', amount: '360.00 USDC', date: 'Aug 22, 2026', status: 'Paid' },
-]
+type RuntimeInvoice = {
+  id: string
+  billTo: string
+  amount: string
+  asset: 'USDC'
+  memo: string
+  createdAt: Date
+  expiresAt: Date
+  status: 'Unpaid'
+}
+
+const runtimeInvoicesStorageKey = 'arklake_runtime_invoices_v1'
+
+type StoredRuntimeInvoice = Omit<RuntimeInvoice, 'createdAt' | 'expiresAt'> & {
+  createdAt: string
+  expiresAt: string
+}
+
+const parseStoredRuntimeInvoiceDate = (value: unknown) => {
+  if (typeof value !== 'string') return null
+
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+const parseStoredRuntimeInvoice = (value: unknown): RuntimeInvoice | null => {
+  if (!value || typeof value !== 'object') return null
+
+  const invoice = value as Partial<StoredRuntimeInvoice>
+  const createdAt = parseStoredRuntimeInvoiceDate(invoice.createdAt)
+  const expiresAt = parseStoredRuntimeInvoiceDate(invoice.expiresAt)
+
+  if (
+    typeof invoice.id !== 'string' ||
+    typeof invoice.billTo !== 'string' ||
+    typeof invoice.amount !== 'string' ||
+    invoice.asset !== 'USDC' ||
+    typeof invoice.memo !== 'string' ||
+    invoice.status !== 'Unpaid' ||
+    !createdAt ||
+    !expiresAt
+  ) {
+    return null
+  }
+
+  return {
+    id: invoice.id,
+    billTo: invoice.billTo,
+    amount: invoice.amount,
+    asset: invoice.asset,
+    memo: invoice.memo,
+    createdAt,
+    expiresAt,
+    status: invoice.status,
+  }
+}
+
+const loadRuntimeInvoices = () => {
+  try {
+    const storedInvoices = window.localStorage.getItem(runtimeInvoicesStorageKey)
+    if (!storedInvoices) return []
+
+    const parsedInvoices = JSON.parse(storedInvoices)
+    if (!Array.isArray(parsedInvoices)) return []
+
+    const runtimeInvoices = parsedInvoices.map(parseStoredRuntimeInvoice)
+    if (runtimeInvoices.some((invoice) => invoice === null)) return []
+
+    return runtimeInvoices as RuntimeInvoice[]
+  } catch {
+    return []
+  }
+}
+
+const serializeRuntimeInvoices = (invoices: RuntimeInvoice[]): StoredRuntimeInvoice[] =>
+  invoices.map((invoice) => ({
+    ...invoice,
+    createdAt: invoice.createdAt.toISOString(),
+    expiresAt: invoice.expiresAt.toISOString(),
+  }))
+
+const formatInvoiceDate = (date: Date) =>
+  date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+
+const formatInvoiceDateTime = (date: Date) =>
+  date.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })
+
+const getExpiryDate = (expiry: string, createdAt: Date) => {
+  const expiresAt = new Date(createdAt)
+
+  if (expiry === '24 hours') {
+    expiresAt.setHours(expiresAt.getHours() + 24)
+  } else if (expiry === '3 days') {
+    expiresAt.setDate(expiresAt.getDate() + 3)
+  } else if (expiry === '30 days') {
+    expiresAt.setDate(expiresAt.getDate() + 30)
+  } else {
+    expiresAt.setDate(expiresAt.getDate() + 7)
+  }
+
+  return expiresAt
+}
 
 function InvoiceStatusBadge({ status }: { status: InvoiceStatus }) {
   const statusClassNames: Record<InvoiceStatus, string> = {
@@ -2025,6 +2140,7 @@ function InvoiceStatusBadge({ status }: { status: InvoiceStatus }) {
     Unpaid: 'border-amber-200 bg-amber-50 text-amber-700',
     Verifying: 'border-sky-200 bg-sky-50 text-sky-700',
     Paid: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+    Expired: 'border-red-200 bg-red-50 text-red-700',
   }
 
   return (
@@ -2034,49 +2150,191 @@ function InvoiceStatusBadge({ status }: { status: InvoiceStatus }) {
   )
 }
 
-function AppInvoicesPage() {
-  return (
-    <AppShell activeItem="Invoices" title="Invoices" subtitle="Create, receive and track payments.">
-      <section className="rounded-[2rem] border border-lake-border bg-surface p-6 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-lake-border pb-5">
-          <div className="inline-flex rounded-full border border-lake-border bg-lake-canvas p-1 text-sm font-semibold text-slate">
-            <button type="button" className="rounded-full bg-surface px-5 py-2 text-arklake-ink shadow-sm">
-              Sent
-            </button>
-            <button type="button" className="rounded-full px-5 py-2">
-              Received
-            </button>
-          </div>
+const isRuntimeInvoiceExpired = (invoice: RuntimeInvoice) =>
+  invoice.status === 'Unpaid' && invoice.expiresAt.getTime() <= Date.now()
 
+const getRuntimeInvoiceStatus = (invoice: RuntimeInvoice): InvoiceStatus =>
+  isRuntimeInvoiceExpired(invoice) ? 'Expired' : invoice.status
+
+function AppInvoicesPage({ runtimeInvoices = [], onNavigate }: { runtimeInvoices?: RuntimeInvoice[]; onNavigate: (path: string) => void }) {
+  const [statusFilter, setStatusFilter] = useState<'All' | 'Unpaid' | 'Expired'>('All')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [dateSort, setDateSort] = useState<'Newest first' | 'Oldest first'>('Newest first')
+  const [isDateSortOpen, setIsDateSortOpen] = useState(false)
+  const dateSortRef = useRef<HTMLDivElement>(null)
+  const normalizedSearchQuery = searchQuery.trim().toLowerCase()
+  const invoices = runtimeInvoices.map((invoice) => ({
+    invoice: invoice.id,
+    recipient: invoice.billTo,
+    memo: invoice.memo,
+    amount: `${invoice.amount} ${invoice.asset}`,
+    createdAt: invoice.createdAt,
+    date: formatInvoiceDate(invoice.createdAt),
+    status: getRuntimeInvoiceStatus(invoice),
+    href: `/app/invoices/${invoice.id}`,
+  }))
+  const filteredInvoices = invoices.filter((invoice) => {
+    const matchesStatus = statusFilter === 'All' || invoice.status === statusFilter
+    const matchesSearch = !normalizedSearchQuery || [invoice.invoice, invoice.recipient, invoice.memo].some((value) => value.toLowerCase().includes(normalizedSearchQuery))
+
+    return matchesStatus && matchesSearch
+  })
+  const sortedInvoices = [...filteredInvoices].sort((a, b) => {
+    const diff = b.createdAt.getTime() - a.createdAt.getTime()
+    return dateSort === 'Newest first' ? diff : -diff
+  })
+  const emptyTitle = normalizedSearchQuery ? 'No matching invoices' : statusFilter === 'Expired' ? 'No expired invoices' : statusFilter === 'Unpaid' ? 'No unpaid invoices' : 'No invoices yet'
+  const emptyDescription = normalizedSearchQuery
+    ? 'Try a different search or clear the search field.'
+    : statusFilter === 'All'
+    ? 'Create an invoice and request payment from anyone by email.'
+    : 'Try another status filter or create a new invoice.'
+
+  const handleInvoiceClick = (href: string) => {
+    onNavigate(href)
+  }
+
+  const handleInvoiceKeyDown = (event: React.KeyboardEvent<HTMLElement>, href: string) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+      handleInvoiceClick(href)
+    }
+  }
+
+  const handleInvoiceLinkClick = (event: React.MouseEvent<HTMLAnchorElement>, href: string) => {
+    event.preventDefault()
+    event.stopPropagation()
+    handleInvoiceClick(href)
+  }
+
+  useEffect(() => {
+    if (!isDateSortOpen) return
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!dateSortRef.current?.contains(event.target as Node)) {
+        setIsDateSortOpen(false)
+      }
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsDateSortOpen(false)
+      }
+    }
+
+    document.addEventListener('pointerdown', handlePointerDown)
+    document.addEventListener('keydown', handleKeyDown)
+
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [isDateSortOpen])
+
+  return (
+    <AppShell activeItem="Invoices" title="Invoices" subtitle="Create, receive and track payments." onNavigate={onNavigate}>
+      <section className="rounded-[2rem] border border-lake-border bg-surface p-6 shadow-sm">
+        <div className="flex flex-wrap items-center justify-end gap-4 border-b border-lake-border pb-5">
           <div className="flex flex-wrap items-center gap-3">
-            <button type="button" className="inline-flex items-center gap-2 rounded-full border border-lake-border bg-surface px-4 py-2.5 text-sm font-semibold text-slate shadow-sm">
-              Status
-              <svg className="h-3.5 w-3.5" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                <path d="M3 4.5 6 7.5l3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </button>
-            <button type="button" className="inline-flex items-center gap-2 rounded-full border border-lake-border bg-surface px-4 py-2.5 text-sm font-semibold text-slate shadow-sm">
-              Date
-              <svg className="h-3.5 w-3.5" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                <path d="M3 4.5 6 7.5l3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </button>
+            <div className="inline-flex rounded-full border border-lake-border bg-lake-canvas p-1 text-sm font-semibold text-slate" aria-label="Filter invoices by status">
+              {(['All', 'Unpaid', 'Expired'] as const).map((filter) => (
+                <button
+                  key={filter}
+                  type="button"
+                  className={`rounded-full px-4 py-1.5 ${statusFilter === filter ? 'bg-surface text-arklake-ink shadow-sm' : ''}`}
+                  onClick={() => setStatusFilter(filter)}
+                >
+                  {filter}
+                </button>
+              ))}
+            </div>
+            <div className="relative" ref={dateSortRef}>
+              <button
+                type="button"
+                className="inline-flex items-center gap-2 rounded-full border border-lake-border bg-surface px-4 py-2.5 text-sm font-semibold text-slate shadow-sm"
+                aria-haspopup="menu"
+                aria-expanded={isDateSortOpen}
+                onClick={() => setIsDateSortOpen((isOpen) => !isOpen)}
+              >
+                {dateSort}
+                <svg className="h-3.5 w-3.5" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                  <path d="M3 4.5 6 7.5l3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+              {isDateSortOpen ? (
+                <div className="absolute right-0 z-20 mt-2 w-40 rounded-2xl border border-lake-border bg-surface p-1.5 shadow-[0_18px_54px_rgba(20,33,39,0.12)]" role="menu">
+                  {(['Newest first', 'Oldest first'] as const).map((option) => (
+                    <button
+                      key={option}
+                      type="button"
+                      className={`w-full rounded-xl px-3 py-2 text-left text-sm font-semibold ${dateSort === option ? 'bg-aqua-mist text-arklake-ink' : 'text-slate hover:bg-lake-canvas hover:text-arklake-ink'}`}
+                      role="menuitemradio"
+                      aria-checked={dateSort === option}
+                      onClick={() => {
+                        setDateSort(option)
+                        setIsDateSortOpen(false)
+                      }}
+                    >
+                      {option}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
             <label className="flex min-w-[260px] items-center gap-2 rounded-full border border-lake-border bg-surface px-4 py-2.5 text-sm text-slate shadow-sm">
               <svg className="h-4 w-4 shrink-0" viewBox="0 0 20 20" fill="none" aria-hidden="true">
                 <path d="m14.5 14.5 2.5 2.5M8.75 15a6.25 6.25 0 1 0 0-12.5 6.25 6.25 0 0 0 0 12.5Z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
               </svg>
-              <input className="min-w-0 flex-1 bg-transparent text-sm font-medium outline-none placeholder:text-slate" placeholder="Search invoices" aria-label="Search invoices" />
+              <input
+                className="min-w-0 flex-1 bg-transparent text-sm font-medium outline-none placeholder:text-slate"
+                placeholder="Search invoices"
+                aria-label="Search invoices"
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+              />
             </label>
           </div>
         </div>
 
-        <div className="mt-4 grid gap-3 lg:hidden">
-          {appInvoices.map((invoice) => (
-            <article key={invoice.invoice} className="rounded-[1.5rem] border border-lake-border bg-surface px-4 py-4 shadow-sm">
+        {sortedInvoices.length === 0 ? (
+          <div className="flex min-h-[360px] flex-col items-center justify-center px-6 py-8 text-center">
+            <img
+              className="h-[154px] w-[206px] object-contain"
+              src="/app/illustrations/invoice-empty.svg"
+              alt=""
+              aria-hidden="true"
+            />
+            <h3 className="mt-3 text-2xl font-semibold tracking-[-0.05em] text-arklake-ink">{emptyTitle}</h3>
+            <p className="mt-2 max-w-sm text-sm leading-6 text-slate">
+              {emptyDescription}
+            </p>
+            <a href="/app/invoices/create" className="mt-5 rounded-full bg-arklake-ink px-5 py-2.5 text-sm font-semibold text-white shadow-sm" onClick={(event) => {
+              event.preventDefault()
+              onNavigate('/app/invoices/create')
+            }}>
+              + Create invoice
+            </a>
+          </div>
+        ) : (
+          <>
+            <div className="mt-4 grid gap-3 lg:hidden">
+              {sortedInvoices.map((invoice) => (
+            <article
+              key={invoice.invoice}
+              className={`rounded-[1.5rem] border border-lake-border bg-surface px-4 py-4 shadow-sm ${invoice.href ? 'cursor-pointer transition hover:bg-aqua-mist/30' : ''}`}
+              onClick={invoice.href ? () => handleInvoiceClick(invoice.href!) : undefined}
+              onKeyDown={invoice.href ? (event) => handleInvoiceKeyDown(event, invoice.href!) : undefined}
+              role={invoice.href ? 'link' : undefined}
+              tabIndex={invoice.href ? 0 : undefined}
+            >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
-                    <h3 className="font-semibold text-arklake-ink">{invoice.invoice}</h3>
+                    {invoice.href ? (
+                      <a href={invoice.href} className="break-all font-semibold text-arklake-ink" onClick={(event) => handleInvoiceLinkClick(event, invoice.href!)}>{invoice.invoice}</a>
+                    ) : (
+                      <h3 className="font-semibold text-arklake-ink">{invoice.invoice}</h3>
+                    )}
                     <svg className="h-4 w-4 shrink-0 text-slate" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                       <path d="m6 4 4 4-4 4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
                     </svg>
@@ -2094,8 +2352,8 @@ function AppInvoicesPage() {
           ))}
         </div>
 
-        <div className="mt-4 hidden overflow-hidden rounded-[1.5rem] border border-lake-border lg:block">
-          <table className="w-full min-w-[760px] border-collapse text-left text-sm">
+            <div className="mt-4 hidden overflow-hidden rounded-[1.5rem] border border-lake-border lg:block">
+              <table className="w-full min-w-[760px] border-collapse text-left text-sm">
             <thead className="bg-lake-canvas text-xs font-semibold uppercase tracking-[0.14em] text-slate">
               <tr>
                 <th className="px-5 py-4">Invoice</th>
@@ -2107,9 +2365,16 @@ function AppInvoicesPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-lake-border bg-surface">
-              {appInvoices.map((invoice) => (
-                <tr key={invoice.invoice} className="transition hover:bg-aqua-mist/30">
-                  <td className="px-5 py-5 font-semibold text-arklake-ink">{invoice.invoice}</td>
+              {sortedInvoices.map((invoice) => (
+                <tr
+                  key={invoice.invoice}
+                  className={`transition hover:bg-aqua-mist/30 ${invoice.href ? 'cursor-pointer' : ''}`}
+                  onClick={invoice.href ? () => handleInvoiceClick(invoice.href!) : undefined}
+                  onKeyDown={invoice.href ? (event) => handleInvoiceKeyDown(event, invoice.href!) : undefined}
+                  role={invoice.href ? 'link' : undefined}
+                  tabIndex={invoice.href ? 0 : undefined}
+                >
+                  <td className="px-5 py-5 font-semibold text-arklake-ink">{invoice.href ? <a href={invoice.href} onClick={(event) => handleInvoiceLinkClick(event, invoice.href!)}>{invoice.invoice}</a> : invoice.invoice}</td>
                   <td className="px-5 py-5 font-medium text-slate">{invoice.recipient}</td>
                   <td className="px-5 py-5 font-semibold text-arklake-ink">{invoice.amount}</td>
                   <td className="px-5 py-5 font-medium text-slate">{invoice.date}</td>
@@ -2122,8 +2387,297 @@ function AppInvoicesPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
+              </table>
+            </div>
+          </>
+        )}
+      </section>
+    </AppShell>
+  )
+}
+
+type CreateInvoiceErrors = {
+  email?: string
+  amount?: string
+  expiry?: string
+}
+
+function ReviewInvoiceRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="py-4 first:pt-0 last:pb-0">
+      <p className="text-sm font-semibold text-slate">{label}</p>
+      <div className="mt-2 min-w-0 break-words text-lg font-semibold text-arklake-ink [overflow-wrap:anywhere]">{children}</div>
+    </div>
+  )
+}
+
+function AppCreateInvoicePage({ onCreateInvoice, onNavigate }: { onCreateInvoice: (invoice: RuntimeInvoice) => void; onNavigate: (path: string) => void }) {
+  const [email, setEmail] = useState('')
+  const [amount, setAmount] = useState('')
+  const [memo, setMemo] = useState('')
+  const [expiry, setExpiry] = useState('7 days')
+  const [errors, setErrors] = useState<CreateInvoiceErrors>({})
+  const [step, setStep] = useState<'form' | 'review'>('form')
+
+  const validateForm = () => {
+    const nextErrors: CreateInvoiceErrors = {}
+    const trimmedEmail = email.trim()
+    const trimmedAmount = amount.trim()
+    const parsedAmount = Number(trimmedAmount)
+
+    if (!trimmedEmail) {
+      nextErrors.email = 'Email address is required.'
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+      nextErrors.email = 'Enter a valid email address.'
+    }
+
+    if (trimmedAmount === '') {
+      nextErrors.amount = 'Amount is required.'
+    } else if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+      nextErrors.amount = 'Enter an amount greater than 0.'
+    }
+
+    if (!expiry) {
+      nextErrors.expiry = 'Choose an expiry.'
+    }
+
+    setErrors(nextErrors)
+    return Object.keys(nextErrors).length === 0
+  }
+
+  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (validateForm()) {
+      setStep('review')
+    }
+  }
+
+  const handleCreateInvoice = () => {
+    const createdAt = new Date()
+    const invoice: RuntimeInvoice = {
+      id: crypto.randomUUID(),
+      billTo: email.trim(),
+      amount: amount.trim(),
+      asset: 'USDC',
+      memo: memo.trim(),
+      createdAt,
+      expiresAt: getExpiryDate(expiry, createdAt),
+      status: 'Unpaid',
+    }
+
+    onCreateInvoice(invoice)
+    onNavigate(`/app/invoices/${invoice.id}`)
+  }
+
+  if (step === 'review') {
+    return (
+      <AppShell activeItem="Invoices" title="Review invoice" subtitle="Check the details before creating your invoice." onNavigate={onNavigate}>
+        <section className="max-w-3xl rounded-[2rem] border border-lake-border bg-surface p-5 shadow-sm sm:p-6">
+          <div className="rounded-[1.5rem] border border-lake-border bg-lake-canvas p-5 sm:p-6">
+            <h2 className="text-xl font-semibold tracking-[-0.04em] text-arklake-ink">Invoice details</h2>
+            <div className="mt-5 divide-y divide-lake-border">
+              <ReviewInvoiceRow label="Bill to">{email.trim()}</ReviewInvoiceRow>
+              <ReviewInvoiceRow label="Amount">
+                <span className="inline-flex max-w-full flex-wrap items-center gap-2">
+                  <img className="h-7 w-7 rounded-full" src="/brand/usdc-token.svg" alt="" aria-hidden="true" />
+                  <span>{amount.trim()} USDC</span>
+                </span>
+              </ReviewInvoiceRow>
+              <ReviewInvoiceRow label="Memo">{memo.trim() || '—'}</ReviewInvoiceRow>
+              <ReviewInvoiceRow label="Expiry">{expiry}</ReviewInvoiceRow>
+            </div>
+          </div>
+
+          <div className="mt-8 flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">
+            <button type="button" className="inline-flex items-center justify-center rounded-full border border-lake-border bg-surface px-5 py-2.5 text-sm font-semibold text-arklake-ink shadow-sm" onClick={() => setStep('form')}>
+              Back
+            </button>
+            <button type="button" className="inline-flex items-center justify-center rounded-full bg-arklake-ink px-5 py-2.5 text-sm font-semibold text-white shadow-sm" onClick={handleCreateInvoice}>
+              Create invoice
+            </button>
+          </div>
+        </section>
+      </AppShell>
+    )
+  }
+
+  return (
+    <AppShell activeItem="Invoices" title="Create invoice" subtitle="Request payment from anyone by email." onNavigate={onNavigate}>
+      <form className="max-w-3xl rounded-[2rem] border border-lake-border bg-surface p-5 shadow-sm sm:p-6" onSubmit={handleSubmit} noValidate>
+        <div className="grid gap-6">
+          <label className="block">
+            <span className="text-sm font-semibold text-arklake-ink">Bill to</span>
+            <input
+              className={`mt-2 w-full rounded-[1.25rem] border bg-surface px-4 py-3 text-base font-medium text-arklake-ink outline-none transition placeholder:text-slate focus:ring-4 focus:ring-arklake-aqua/15 ${errors.email ? 'border-red-300' : 'border-lake-border focus:border-arklake-aqua'}`}
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="client@example.com"
+              aria-describedby="create-invoice-email-helper create-invoice-email-error"
+              aria-invalid={errors.email ? 'true' : 'false'}
+            />
+            <span id="create-invoice-email-helper" className="mt-2 block text-sm leading-6 text-slate">We'll send the invoice to this email address.</span>
+            {errors.email ? <span id="create-invoice-email-error" className="mt-1 block text-sm font-semibold text-red-600">{errors.email}</span> : null}
+          </label>
+
+          <label className="block">
+            <span className="text-sm font-semibold text-arklake-ink">Amount</span>
+            <div className={`mt-2 flex flex-col gap-3 rounded-[1.25rem] border bg-surface p-2 transition focus-within:ring-4 focus-within:ring-arklake-aqua/15 sm:flex-row sm:items-center ${errors.amount ? 'border-red-300' : 'border-lake-border focus-within:border-arklake-aqua'}`}>
+              <input
+                className="min-w-0 flex-1 bg-transparent px-2 py-2 text-base font-medium text-arklake-ink outline-none placeholder:text-slate sm:px-3"
+                type="number"
+                inputMode="decimal"
+                min="0"
+                step="0.01"
+                value={amount}
+                onChange={(event) => setAmount(event.target.value)}
+                placeholder="0.00"
+                aria-describedby="create-invoice-amount-error"
+                aria-invalid={errors.amount ? 'true' : 'false'}
+              />
+              <div className="inline-flex w-full shrink-0 items-center justify-center gap-2 rounded-full border border-lake-border bg-lake-canvas px-4 py-2.5 text-sm font-semibold text-arklake-ink sm:w-auto">
+                <img className="h-7 w-7 rounded-full" src="/brand/usdc-token.svg" alt="" aria-hidden="true" />
+                USDC
+              </div>
+            </div>
+            {errors.amount ? <span id="create-invoice-amount-error" className="mt-2 block text-sm font-semibold text-red-600">{errors.amount}</span> : null}
+          </label>
+
+          <label className="block">
+            <span className="text-sm font-semibold text-arklake-ink">Memo <span className="font-medium text-slate">Optional</span></span>
+            <input
+              className="mt-2 w-full rounded-[1.25rem] border border-lake-border bg-surface px-4 py-3 text-base font-medium text-arklake-ink outline-none transition placeholder:text-slate focus:border-arklake-aqua focus:ring-4 focus:ring-arklake-aqua/15"
+              type="text"
+              value={memo}
+              onChange={(event) => setMemo(event.target.value)}
+              placeholder="Website design"
+              aria-describedby="create-invoice-memo-helper"
+            />
+            <span id="create-invoice-memo-helper" className="mt-2 block text-sm leading-6 text-slate">Add a short description of what this payment is for.</span>
+          </label>
+
+          <label className="block">
+            <span className="text-sm font-semibold text-arklake-ink">Expiry</span>
+            <select
+              className={`mt-2 w-full rounded-[1.25rem] border bg-surface px-4 py-3 text-base font-medium text-arklake-ink outline-none transition focus:ring-4 focus:ring-arklake-aqua/15 ${errors.expiry ? 'border-red-300' : 'border-lake-border focus:border-arklake-aqua'}`}
+              value={expiry}
+              onChange={(event) => setExpiry(event.target.value)}
+              aria-describedby="create-invoice-expiry-error"
+              aria-invalid={errors.expiry ? 'true' : 'false'}
+            >
+              <option value="24 hours">24 hours</option>
+              <option value="3 days">3 days</option>
+              <option value="7 days">7 days</option>
+              <option value="30 days">30 days</option>
+            </select>
+            {errors.expiry ? <span id="create-invoice-expiry-error" className="mt-2 block text-sm font-semibold text-red-600">{errors.expiry}</span> : null}
+          </label>
         </div>
+
+        <div className="mt-8 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+          <a href="/app/invoices" className="inline-flex items-center justify-center rounded-full border border-lake-border bg-surface px-5 py-2.5 text-sm font-semibold text-arklake-ink shadow-sm" onClick={(event) => {
+            event.preventDefault()
+            onNavigate('/app/invoices')
+          }}>
+            Cancel
+          </a>
+          <button type="submit" className="inline-flex items-center justify-center rounded-full bg-arklake-ink px-5 py-2.5 text-sm font-semibold text-white shadow-sm">
+            Continue
+          </button>
+        </div>
+      </form>
+    </AppShell>
+  )
+}
+
+function AppInvoiceDetailPage({ invoice, onNavigate }: { invoice: RuntimeInvoice; onNavigate: (path: string) => void }) {
+  const status = getRuntimeInvoiceStatus(invoice)
+  const [hasCopiedInvoiceId, setHasCopiedInvoiceId] = useState(false)
+
+  useEffect(() => {
+    if (!hasCopiedInvoiceId) return
+
+    const timeoutId = window.setTimeout(() => setHasCopiedInvoiceId(false), 1800)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [hasCopiedInvoiceId])
+
+  const handleCopyInvoiceId = async () => {
+    await navigator.clipboard.writeText(invoice.id)
+    setHasCopiedInvoiceId(true)
+  }
+
+  return (
+    <AppShell activeItem="Invoices" title="Invoice detail" subtitle="Review this invoice request." onNavigate={onNavigate}>
+      <section className="max-w-3xl rounded-[2rem] border border-lake-border bg-surface p-5 shadow-sm sm:p-6">
+        <div className="flex flex-col gap-3 border-b border-lake-border pb-5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-slate">Invoice ID</p>
+            <h2 className="mt-2 break-all text-xl font-semibold tracking-[-0.04em] text-arklake-ink sm:text-2xl">{invoice.id}</h2>
+          </div>
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            <InvoiceStatusBadge status={status} />
+            <button
+              type="button"
+              className="inline-flex items-center justify-center rounded-full border border-lake-border bg-surface px-3 py-1 text-xs font-semibold text-arklake-ink shadow-sm transition hover:bg-aqua-mist/50"
+              onClick={handleCopyInvoiceId}
+            >
+              {hasCopiedInvoiceId ? 'Copied' : 'Copy invoice ID'}
+            </button>
+          </div>
+        </div>
+
+        {status === 'Expired' ? (
+          <div className="mt-5 rounded-[1.5rem] border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+            This invoice has expired and can no longer be paid.
+          </div>
+        ) : null}
+
+        <div className="mt-5 divide-y divide-lake-border">
+          <ReviewInvoiceRow label="Bill to">{invoice.billTo}</ReviewInvoiceRow>
+          <ReviewInvoiceRow label="Amount">
+            <span className="inline-flex max-w-full flex-wrap items-center gap-2">
+              <img className="h-7 w-7 rounded-full" src="/brand/usdc-token.svg" alt="" aria-hidden="true" />
+              <span>{invoice.amount} {invoice.asset}</span>
+            </span>
+          </ReviewInvoiceRow>
+          <ReviewInvoiceRow label="Memo">{invoice.memo || '—'}</ReviewInvoiceRow>
+          <ReviewInvoiceRow label="Created">{formatInvoiceDateTime(invoice.createdAt)}</ReviewInvoiceRow>
+          <ReviewInvoiceRow label={status === 'Expired' ? 'Expired at' : 'Expires'}>{formatInvoiceDateTime(invoice.expiresAt)}</ReviewInvoiceRow>
+        </div>
+
+        <div className="mt-8">
+          <a href="/app/invoices" className="inline-flex items-center justify-center rounded-full border border-lake-border bg-surface px-5 py-2.5 text-sm font-semibold text-arklake-ink shadow-sm" onClick={(event) => {
+            event.preventDefault()
+            onNavigate('/app/invoices')
+          }}>
+            Back to invoices
+          </a>
+        </div>
+      </section>
+    </AppShell>
+  )
+}
+
+function AppInvoiceNotFoundPage({ onNavigate }: { onNavigate: (path: string) => void }) {
+  return (
+    <AppShell activeItem="Invoices" title="Invoice not found" subtitle="This invoice may no longer exist or the link may be invalid." onNavigate={onNavigate}>
+      <section className="max-w-3xl rounded-[2rem] border border-lake-border bg-surface p-6 text-center shadow-sm">
+        <img
+          className="mx-auto h-[154px] w-[206px] object-contain"
+          src="/app/illustrations/invoice-empty.svg"
+          alt=""
+          aria-hidden="true"
+        />
+        <h2 className="mt-3 text-2xl font-semibold tracking-[-0.05em] text-arklake-ink">Invoice not found</h2>
+        <p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-slate">This invoice may no longer exist or the link may be invalid.</p>
+        <button
+          type="button"
+          className="mt-5 rounded-full bg-arklake-ink px-5 py-2.5 text-sm font-semibold text-white shadow-sm"
+          onClick={() => onNavigate('/app/invoices')}
+        >
+          Back to invoices
+        </button>
       </section>
     </AppShell>
   )
@@ -2154,9 +2708,9 @@ function TokenIcon({ symbol, icon }: { symbol: string; icon?: string }) {
   )
 }
 
-function AppWalletPage() {
+function AppWalletPage({ onNavigate }: { onNavigate: AppNavigateHandler }) {
   return (
-    <AppShell activeItem="Wallet" title="Wallet" subtitle="Your money in Arklake.">
+    <AppShell activeItem="Wallet" title="Wallet" subtitle="Your money in Arklake." onNavigate={onNavigate}>
       <section className="grid gap-6 xl:grid-cols-[minmax(0,1.05fr)_minmax(340px,0.62fr)]">
         <div className="rounded-[2rem] border border-lake-border bg-surface p-6 shadow-sm">
           <div className="flex min-h-[224px] flex-col items-start justify-between gap-6 overflow-hidden rounded-[1.5rem] bg-gradient-to-br from-white to-aqua-mist/60 px-6 py-6 sm:px-8 lg:flex-row lg:items-center lg:gap-7">
@@ -2261,9 +2815,9 @@ function SwapTokenSelector({ symbol, icon }: { symbol: string; icon: string }) {
   )
 }
 
-function AppSwapPage() {
+function AppSwapPage({ onNavigate }: { onNavigate: AppNavigateHandler }) {
   return (
-    <AppShell activeItem="Swap" title="Swap" subtitle="Convert your assets.">
+    <AppShell activeItem="Swap" title="Swap" subtitle="Convert your assets." onNavigate={onNavigate}>
       <section className="grid gap-6 lg:grid-cols-[minmax(0,0.92fr)_minmax(340px,0.48fr)]">
         <div className="rounded-[2rem] border border-lake-border bg-surface p-5 shadow-sm sm:p-6">
           <div className="mb-5 flex items-center justify-between gap-3">
@@ -2331,7 +2885,10 @@ function AppSwapPage() {
               <h2 className="mt-4 text-3xl font-semibold leading-[1.05] tracking-[-0.055em] text-arklake-ink">Need USDC to pay an invoice?</h2>
               <p className="mt-4 text-sm leading-6 text-slate">Swap another supported asset to USDC before paying.</p>
             </div>
-            <a href="/app/invoices" className="mt-8 inline-flex w-fit items-center justify-center rounded-full border border-lake-border bg-surface px-5 py-2.5 text-sm font-semibold text-arklake-ink shadow-sm">
+            <a href="/app/invoices" className="mt-8 inline-flex w-fit items-center justify-center rounded-full border border-lake-border bg-surface px-5 py-2.5 text-sm font-semibold text-arklake-ink shadow-sm" onClick={(event) => {
+              event.preventDefault()
+              onNavigate('/app/invoices')
+            }}>
               View invoices
             </a>
           </div>
@@ -2366,9 +2923,9 @@ function SecurityRow({ label, status }: { label: string; status: string }) {
   )
 }
 
-function AppAccountPage() {
+function AppAccountPage({ onNavigate }: { onNavigate: AppNavigateHandler }) {
   return (
-    <AppShell activeItem="Account" title="Account" subtitle="Manage your profile, wallet and security.">
+    <AppShell activeItem="Account" title="Account" subtitle="Manage your profile, wallet and security." onNavigate={onNavigate}>
       <section className="grid gap-6 lg:grid-cols-[minmax(0,0.95fr)_minmax(340px,0.58fr)]">
         <div className="grid gap-6">
           <section className="rounded-[2rem] border border-lake-border bg-surface p-6 shadow-sm">
@@ -2433,38 +2990,91 @@ function AppAccountPage() {
 export default function App() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const [isMobileProductOpen, setIsMobileProductOpen] = useState(false)
+  const [runtimeInvoices, setRuntimeInvoices] = useState<RuntimeInvoice[]>([])
+  const [hasHydratedRuntimeInvoices, setHasHydratedRuntimeInvoices] = useState(false)
+  const [currentPath, setCurrentPath] = useState(window.location.pathname)
+  const [, setRuntimeInvoiceStatusTick] = useState(0)
+
+  useEffect(() => {
+    setRuntimeInvoices(loadRuntimeInvoices())
+    setHasHydratedRuntimeInvoices(true)
+  }, [])
+
+  useEffect(() => {
+    if (!hasHydratedRuntimeInvoices) return
+
+    window.localStorage.setItem(runtimeInvoicesStorageKey, JSON.stringify(serializeRuntimeInvoices(runtimeInvoices)))
+  }, [hasHydratedRuntimeInvoices, runtimeInvoices])
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setRuntimeInvoiceStatusTick((tick) => tick + 1)
+    }, 60000)
+
+    return () => window.clearInterval(intervalId)
+  }, [])
+
+  useEffect(() => {
+    const handlePopState = () => setCurrentPath(window.location.pathname)
+    window.addEventListener('popstate', handlePopState)
+
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [])
 
   useEffect(() => {
     window.history.scrollRestoration = 'manual'
 
     const pendingLandingScroll = window.sessionStorage.getItem(pendingLandingScrollKey)
-    if (window.location.pathname === '/' && pendingLandingScroll) {
+    if (currentPath === '/' && pendingLandingScroll) {
       window.sessionStorage.removeItem(pendingLandingScrollKey)
       window.requestAnimationFrame(() => scrollToLandingSection(pendingLandingScroll))
       return
     }
 
     window.scrollTo(0, 0)
-  }, [])
+  }, [currentPath])
 
-  if (window.location.pathname === '/app') {
-    return <AppHomePage />
+  const handleCreateInvoice = (invoice: RuntimeInvoice) => {
+    setRuntimeInvoices((invoices) => [invoice, ...invoices])
   }
 
-  if (window.location.pathname === '/app/invoices') {
-    return <AppInvoicesPage />
+  const handleAppNavigate = (path: string) => {
+    window.history.pushState(null, '', path)
+    setCurrentPath(path)
   }
 
-  if (window.location.pathname === '/app/wallet') {
-    return <AppWalletPage />
+  const invoiceDetailId = currentPath.startsWith('/app/invoices/') && currentPath !== '/app/invoices/create'
+    ? currentPath.slice('/app/invoices/'.length)
+    : null
+  const selectedInvoice = invoiceDetailId ? runtimeInvoices.find((invoice) => invoice.id === invoiceDetailId) : undefined
+
+  if (currentPath === '/app') {
+    return <AppHomePage onNavigate={handleAppNavigate} />
   }
 
-  if (window.location.pathname === '/app/swap') {
-    return <AppSwapPage />
+  if (currentPath === '/app/invoices') {
+    return <AppInvoicesPage runtimeInvoices={runtimeInvoices} onNavigate={handleAppNavigate} />
   }
 
-  if (window.location.pathname === '/app/account') {
-    return <AppAccountPage />
+  if (currentPath === '/app/invoices/create') {
+    return <AppCreateInvoicePage onCreateInvoice={handleCreateInvoice} onNavigate={handleAppNavigate} />
+  }
+
+
+  if (invoiceDetailId) {
+    return selectedInvoice ? <AppInvoiceDetailPage invoice={selectedInvoice} onNavigate={handleAppNavigate} /> : <AppInvoiceNotFoundPage onNavigate={handleAppNavigate} />
+  }
+
+  if (currentPath === '/app/wallet') {
+    return <AppWalletPage onNavigate={handleAppNavigate} />
+  }
+
+  if (currentPath === '/app/swap') {
+    return <AppSwapPage onNavigate={handleAppNavigate} />
+  }
+
+  if (currentPath === '/app/account') {
+    return <AppAccountPage onNavigate={handleAppNavigate} />
   }
 
   if (window.location.pathname === '/docs/getting-started') {
