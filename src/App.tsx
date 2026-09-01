@@ -1887,18 +1887,12 @@ function AppHeader({ title = 'Home', subtitle = 'Your account overview.', onNavi
         }}>
           + Create invoice
         </a>
-        <button type="button" className="flex h-10 w-10 items-center justify-center rounded-full border border-lake-border bg-surface text-arklake-ink shadow-sm" aria-label="Notifications">
-          <svg className="h-4.5 w-4.5" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-            <path d="M15 8.5a5 5 0 0 0-10 0c0 4-1.5 5-1.5 5h13S15 12.5 15 8.5Z" stroke="currentColor" strokeWidth="1.55" strokeLinecap="round" strokeLinejoin="round" />
-            <path d="M8.4 16a1.8 1.8 0 0 0 3.2 0" stroke="currentColor" strokeWidth="1.55" strokeLinecap="round" />
-          </svg>
-        </button>
-        <button type="button" className="flex items-center gap-2 rounded-full border border-lake-border bg-surface py-1.5 pl-1.5 pr-3 text-sm font-semibold text-arklake-ink shadow-sm" aria-label="Account menu">
+        <a href="/app/account" className="flex items-center rounded-full border border-lake-border bg-surface py-1.5 pl-1.5 pr-3 text-sm font-semibold text-arklake-ink shadow-sm" aria-label="Open account" onClick={(event) => {
+          event.preventDefault()
+          onNavigate('/app/account')
+        }}>
           <span className="flex h-8 w-8 items-center justify-center rounded-full bg-aqua-mist text-sm font-semibold text-arklake-aqua">D</span>
-          <svg className="h-3.5 w-3.5 text-slate" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-            <path d="M3 4.5 6 7.5l3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
+        </a>
       </div>
     </header>
   )
@@ -2003,7 +1997,10 @@ function AppHomePage({ onNavigate }: { onNavigate: AppNavigateHandler }) {
             <section className="mt-6 rounded-[2rem] border border-lake-border bg-surface p-6 shadow-sm">
               <div className="flex items-center justify-between">
                 <h2 className="text-xl font-semibold tracking-[-0.04em] text-arklake-ink">Invoices</h2>
-                <button type="button" className="text-sm font-semibold text-arklake-aqua">View all</button>
+                <a href="/app/invoices" className="text-sm font-semibold text-arklake-aqua" onClick={(event) => {
+                  event.preventDefault()
+                  onNavigate('/app/invoices')
+                }}>View all</a>
               </div>
 
               <div className="flex min-h-[276px] flex-col items-center justify-center px-6 py-8 text-center">
@@ -2985,7 +2982,7 @@ function AccountRow({ label, value, detail }: { label: string; value: string; de
     <div className="flex flex-col items-start gap-3 py-4 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
       <div className="min-w-0">
         <p className="text-sm font-semibold text-slate">{label}</p>
-        <p className="mt-1 break-words font-semibold text-arklake-ink">{value}</p>
+        <p className="mt-1 break-words font-semibold text-arklake-ink [overflow-wrap:anywhere]">{value}</p>
       </div>
       {detail ? <span className="shrink-0 rounded-full border border-aqua-mist bg-aqua-mist px-3 py-1 text-xs font-semibold text-arklake-ink">{detail}</span> : null}
     </div>
@@ -3011,12 +3008,11 @@ function AppAccountPage({ onNavigate }: { onNavigate: AppNavigateHandler }) {
       <section className="grid gap-6 lg:grid-cols-[minmax(0,0.95fr)_minmax(340px,0.58fr)]">
         <div className="grid gap-6">
           <section className="rounded-[2rem] border border-lake-border bg-surface p-6 shadow-sm">
-            <div className="flex items-center justify-between">
+            <div>
               <h2 className="text-xl font-semibold tracking-[-0.04em] text-arklake-ink">Profile</h2>
-              <button type="button" className="text-sm font-semibold text-arklake-aqua">Edit</button>
             </div>
             <div className="mt-5 divide-y divide-lake-border">
-              <AccountRow label="Email" value="duck@example.com" detail="Verified" />
+              <AccountRow label="Email" value="duck@example.com" />
               <AccountRow label="Arklake Name" value="@duck" />
             </div>
           </section>
@@ -3027,17 +3023,6 @@ function AppAccountPage({ onNavigate }: { onNavigate: AppNavigateHandler }) {
                 <h2 className="text-xl font-semibold tracking-[-0.04em] text-arklake-ink">Wallet</h2>
                 <p className="mt-5 text-sm font-semibold text-slate">Wallet address</p>
                 <p className="mt-2 text-xl font-semibold tracking-[-0.05em] text-arklake-ink sm:text-2xl">0xB1f9...446e</p>
-                <div className="mt-5 flex flex-wrap gap-3">
-                  <button type="button" className="inline-flex items-center gap-2 rounded-full border border-lake-border bg-surface px-4 py-2.5 text-sm font-semibold text-arklake-ink shadow-sm">
-                    <svg className="h-4 w-4 text-arklake-aqua" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                      <path d="M7 7V5.5A1.5 1.5 0 0 1 8.5 4h6A1.5 1.5 0 0 1 16 5.5v6A1.5 1.5 0 0 1 14.5 13H13M5.5 7h6A1.5 1.5 0 0 1 13 8.5v6a1.5 1.5 0 0 1-1.5 1.5h-6A1.5 1.5 0 0 1 4 14.5v-6A1.5 1.5 0 0 1 5.5 7Z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-                    </svg>
-                    Copy
-                  </button>
-                  <button type="button" className="rounded-full border border-lake-border bg-surface px-4 py-2.5 text-sm font-semibold text-arklake-ink shadow-sm">
-                    View on explorer
-                  </button>
-                </div>
               </div>
               <img className="mx-auto h-auto w-full max-w-[220px] shrink-0 object-contain lg:h-[148px] lg:w-[190px]" src="/app/illustrations/wallet-hero.svg" alt="" aria-hidden="true" />
             </div>
@@ -3048,19 +3033,9 @@ function AppAccountPage({ onNavigate }: { onNavigate: AppNavigateHandler }) {
           <section className="rounded-[2rem] border border-lake-border bg-surface p-6 shadow-sm">
             <h2 className="text-xl font-semibold tracking-[-0.04em] text-arklake-ink">Security</h2>
             <div className="mt-5 divide-y divide-lake-border">
-              <SecurityRow label="Email" status="Verified" />
-              <SecurityRow label="Passkey" status="Enabled" />
+              <SecurityRow label="Email" status="Coming later" />
+              <SecurityRow label="Passkey" status="Coming later" />
               <SecurityRow label="2FA" status="Coming later" />
-            </div>
-          </section>
-
-          <section className="rounded-[2rem] border border-lake-border bg-surface p-6 shadow-sm">
-            <div className="rounded-[1.5rem] border border-lake-border bg-lake-canvas p-5">
-              <h2 className="text-xl font-semibold tracking-[-0.04em] text-arklake-ink">Sign out</h2>
-              <p className="mt-2 text-sm leading-6 text-slate">End this demo app session on this device.</p>
-              <button type="button" className="mt-5 rounded-full bg-arklake-ink px-5 py-2.5 text-sm font-semibold text-white shadow-sm">
-                Sign out
-              </button>
             </div>
           </section>
         </div>
