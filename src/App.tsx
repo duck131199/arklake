@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import type { W3SSdk as CircleW3SSdk } from '@circle-fin/w3s-pw-web-sdk'
 
 const shellWidth = 'site-shell'
 
@@ -1836,6 +1837,15 @@ function AppIcon({ src }: { src: string }) {
 
 type AppNavigateHandler = (path: string) => void
 
+function AppRedirect({ to, onNavigate }: { to: string; onNavigate: AppNavigateHandler }) {
+  useEffect(() => {
+    window.history.replaceState(null, '', to)
+    onNavigate(to)
+  }, [onNavigate, to])
+
+  return <main className="grid min-h-screen place-items-center bg-lake-canvas text-sm font-semibold text-slate">Redirecting…</main>
+}
+
 function AppSidebar({ activeItem = 'Home', onNavigate }: { activeItem?: string; onNavigate: AppNavigateHandler }) {
   const handleNavClick = (event: React.MouseEvent<HTMLAnchorElement>, href: string) => {
     event.preventDefault()
@@ -1951,7 +1961,9 @@ function AppShell({ activeItem, title, subtitle, children, onNavigate }: { activ
   )
 }
 
-function AppHomePage({ onNavigate }: { onNavigate: AppNavigateHandler }) {
+function AppHomePage({ onNavigate, balances }: { onNavigate: AppNavigateHandler; balances: ArklakeTokenBalance[] }) {
+  const usdcBalance = getUsdcBalance(balances)
+
   return (
     <AppShell activeItem="Home" title="Home" subtitle="Your account overview." onNavigate={onNavigate}>
       <section className="grid gap-6 xl:grid-cols-[minmax(0,1.05fr)_minmax(340px,0.62fr)]">
@@ -1959,8 +1971,7 @@ function AppHomePage({ onNavigate }: { onNavigate: AppNavigateHandler }) {
                 <div className="flex min-h-[224px] flex-col items-start justify-between gap-6 overflow-hidden rounded-[1.5rem] bg-gradient-to-br from-white to-aqua-mist/60 px-6 py-6 sm:px-8 lg:flex-row lg:items-center lg:gap-7">
                   <div className="relative z-10 min-w-0">
                     <p className="text-sm font-semibold text-slate">Available to pay</p>
-                    <p className="mt-5 whitespace-nowrap text-[2.65rem] font-semibold leading-none tracking-[-0.065em] text-arklake-ink sm:text-5xl">0.00 USDC</p>
-                    <p className="mt-3 text-sm font-medium text-slate">≈ $0.00 USD</p>
+                    <p className="mt-5 whitespace-nowrap text-[2.65rem] font-semibold leading-none tracking-[-0.065em] text-arklake-ink sm:text-5xl">{usdcBalance?.amount || '0.00'} USDC</p>
                   </div>
                   <img
                     className="mx-auto h-auto w-full max-w-[260px] shrink-0 object-contain sm:max-w-[310px] lg:h-[190px] lg:w-[310px]"
@@ -2680,19 +2691,6 @@ function AppInvoiceNotFoundPage({ onNavigate }: { onNavigate: (path: string) => 
   )
 }
 
-const walletAssets = [
-  { symbol: 'USDC', name: 'USD Coin', amount: '320.00', value: '≈ $320.00', icon: '/brand/usdc-token.svg' },
-  { symbol: 'EURC', name: 'Euro Coin', amount: '120.00', value: '≈ $130.00', icon: '/brand/eurc-token.png' },
-  { symbol: 'CIRBTC', name: 'Circle BTC', amount: '0.0005', value: '≈ $50.00', icon: '/brand/cirbtc-token.png' },
-]
-
-const walletActivity = [
-  { type: 'Received', amount: '+250.00 USDC', date: 'Aug 30, 2026' },
-  { type: 'Sent', amount: '-80.00 USDC', date: 'Aug 29, 2026' },
-  { type: 'Swap', amount: '100 EURC → 108 USDC', date: 'Aug 28, 2026' },
-  { type: 'Invoice payment', amount: '-120.00 USDC', date: 'Aug 27, 2026' },
-]
-
 function TokenIcon({ symbol, icon }: { symbol: string; icon?: string }) {
   if (icon) {
     return <img className="h-10 w-10 rounded-full" src={icon} alt="" aria-hidden="true" />
@@ -2705,7 +2703,9 @@ function TokenIcon({ symbol, icon }: { symbol: string; icon?: string }) {
   )
 }
 
-function AppWalletPage({ onNavigate }: { onNavigate: AppNavigateHandler }) {
+function AppWalletPage({ onNavigate, balances }: { onNavigate: AppNavigateHandler; balances: ArklakeTokenBalance[] }) {
+  const usdcBalance = getUsdcBalance(balances)
+
   return (
     <AppShell activeItem="Wallet" title="Wallet" subtitle="Your money in Arklake." onNavigate={onNavigate}>
       <section className="grid gap-6 xl:grid-cols-[minmax(0,1.05fr)_minmax(340px,0.62fr)]">
@@ -2713,8 +2713,7 @@ function AppWalletPage({ onNavigate }: { onNavigate: AppNavigateHandler }) {
           <div className="flex min-h-[224px] flex-col items-start justify-between gap-6 overflow-hidden rounded-[1.5rem] bg-gradient-to-br from-white to-aqua-mist/60 px-6 py-6 sm:px-8 lg:flex-row lg:items-center lg:gap-7">
             <div className="relative z-10 min-w-0">
               <p className="text-sm font-semibold text-slate">Available to pay</p>
-              <p className="mt-5 whitespace-nowrap text-[2.35rem] font-semibold leading-none tracking-[-0.065em] text-arklake-ink sm:text-5xl">320.00 USDC</p>
-              <p className="mt-3 text-sm font-medium text-slate">≈ $320.00 USD</p>
+              <p className="mt-5 whitespace-nowrap text-[2.35rem] font-semibold leading-none tracking-[-0.065em] text-arklake-ink sm:text-5xl">{usdcBalance?.amount || '0.00'} USDC</p>
             </div>
             <img className="mx-auto h-auto w-full max-w-[260px] shrink-0 object-contain sm:max-w-[310px] lg:h-[190px] lg:w-[310px]" src="/app/illustrations/wallet-hero.svg" alt="" aria-hidden="true" />
           </div>
@@ -2722,9 +2721,9 @@ function AppWalletPage({ onNavigate }: { onNavigate: AppNavigateHandler }) {
 
         <div className="grid gap-4 xl:grid-cols-1">
           <div className="rounded-[1.75rem] border border-lake-border bg-surface p-5 shadow-sm">
-            <p className="text-sm font-semibold text-slate">Total assets</p>
-            <p className="mt-4 text-3xl font-semibold tracking-[-0.055em] text-arklake-ink">≈ $500.00 USD</p>
-            <p className="mt-2 text-sm leading-6 text-slate">Across demo wallet assets</p>
+            <p className="text-sm font-semibold text-slate">Assets</p>
+            <p className="mt-4 text-3xl font-semibold tracking-[-0.055em] text-arklake-ink">{balances.length}</p>
+            <p className="mt-2 text-sm leading-6 text-slate">Token balances reported by Circle</p>
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-2">
@@ -2763,23 +2762,30 @@ function AppWalletPage({ onNavigate }: { onNavigate: AppNavigateHandler }) {
             <h2 className="text-xl font-semibold tracking-[-0.04em] text-arklake-ink">Assets</h2>
           </div>
 
-          <div className="mt-5 divide-y divide-lake-border">
-            {walletAssets.map((asset) => (
-              <div key={asset.symbol} className="flex items-center justify-between gap-3 py-4 first:pt-0 last:pb-0 sm:gap-4">
-                <div className="flex min-w-0 items-center gap-3">
-                  <TokenIcon symbol={asset.symbol} icon={asset.icon} />
-                  <div className="min-w-0">
-                    <p className="font-semibold text-arklake-ink">{asset.symbol}</p>
-                    <p className="mt-1 text-sm text-slate">{asset.name}</p>
+          {balances.length > 0 ? (
+            <div className="mt-5 divide-y divide-lake-border">
+              {balances.map((asset) => (
+                <div key={`${asset.blockchain}-${asset.tokenId}`} className="flex items-center justify-between gap-3 py-4 first:pt-0 last:pb-0 sm:gap-4">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <TokenIcon symbol={asset.symbol} />
+                    <div className="min-w-0">
+                      <p className="font-semibold text-arklake-ink">{asset.symbol}</p>
+                      <p className="mt-1 text-sm text-slate">{asset.name || asset.blockchain}</p>
+                    </div>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <p className="font-semibold text-arklake-ink">{asset.amount}</p>
+                    <p className="mt-1 text-sm text-slate">{asset.blockchain}</p>
                   </div>
                 </div>
-                <div className="shrink-0 text-right">
-                  <p className="font-semibold text-arklake-ink">{asset.amount}</p>
-                  <p className="mt-1 text-sm text-slate">{asset.value}</p>
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          ) : (
+            <div className="mt-5 rounded-[1.5rem] border border-dashed border-lake-border bg-lake-canvas px-5 py-8 text-center">
+              <p className="font-semibold text-arklake-ink">No token balances yet</p>
+              <p className="mt-2 text-sm leading-6 text-slate">Circle returned no balances for this wallet.</p>
+            </div>
+          )}
         </div>
 
         <div className="rounded-[2rem] border border-lake-border bg-surface p-6 shadow-sm">
@@ -2787,16 +2793,9 @@ function AppWalletPage({ onNavigate }: { onNavigate: AppNavigateHandler }) {
             <h2 className="text-xl font-semibold tracking-[-0.04em] text-arklake-ink">Recent activity</h2>
           </div>
 
-          <div className="mt-5 divide-y divide-lake-border">
-            {walletActivity.map((activity) => (
-              <div key={`${activity.type}-${activity.date}`} className="flex flex-col gap-2 py-4 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                <div className="min-w-0">
-                  <p className="font-semibold text-arklake-ink">{activity.type}</p>
-                  <p className="mt-1 text-sm text-slate">{activity.date}</p>
-                </div>
-                <p className="font-semibold text-arklake-ink sm:shrink-0 sm:text-right">{activity.amount}</p>
-              </div>
-            ))}
+          <div className="mt-5 rounded-[1.5rem] border border-dashed border-lake-border bg-lake-canvas px-5 py-8 text-center">
+            <p className="font-semibold text-arklake-ink">Coming later</p>
+            <p className="mt-2 text-sm leading-6 text-slate">Recent wallet activity will appear here once transaction history is connected.</p>
           </div>
         </div>
       </section>
@@ -3002,7 +3001,17 @@ function SecurityRow({ label, status }: { label: string; status: string }) {
   )
 }
 
-function AppAccountPage({ onNavigate }: { onNavigate: AppNavigateHandler }) {
+function AppAccountPage({ onNavigate, onSignOut, wallet, email }: { onNavigate: AppNavigateHandler; onSignOut: () => void; wallet: ArklakeWalletIdentity | null; email: string }) {
+  const [copyStatus, setCopyStatus] = useState<'idle' | 'copied'>('idle')
+
+  const handleCopyWalletAddress = async () => {
+    if (!wallet?.address) return
+
+    await navigator.clipboard.writeText(wallet.address)
+    setCopyStatus('copied')
+    window.setTimeout(() => setCopyStatus('idle'), 1600)
+  }
+
   return (
     <AppShell activeItem="Account" title="Account" subtitle="Manage your profile, wallet and security." onNavigate={onNavigate}>
       <section className="grid gap-6 lg:grid-cols-[minmax(0,0.95fr)_minmax(340px,0.58fr)]">
@@ -3012,8 +3021,8 @@ function AppAccountPage({ onNavigate }: { onNavigate: AppNavigateHandler }) {
               <h2 className="text-xl font-semibold tracking-[-0.04em] text-arklake-ink">Profile</h2>
             </div>
             <div className="mt-5 divide-y divide-lake-border">
-              <AccountRow label="Email" value="duck@example.com" />
-              <AccountRow label="Arklake Name" value="@duck" />
+              <AccountRow label="Email" value={email || 'Not set'} />
+              <AccountRow label="Arklake Name" value="Not set" />
             </div>
           </section>
 
@@ -3022,7 +3031,14 @@ function AppAccountPage({ onNavigate }: { onNavigate: AppNavigateHandler }) {
               <div className="min-w-0 flex-1">
                 <h2 className="text-xl font-semibold tracking-[-0.04em] text-arklake-ink">Wallet</h2>
                 <p className="mt-5 text-sm font-semibold text-slate">Wallet address</p>
-                <p className="mt-2 text-xl font-semibold tracking-[-0.05em] text-arklake-ink sm:text-2xl">0xB1f9...446e</p>
+                <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-center">
+                  <p className="min-w-0 break-all text-xl font-semibold tracking-[-0.05em] text-arklake-ink sm:text-2xl">{wallet?.address || 'No wallet connected'}</p>
+                  {wallet?.address ? (
+                    <button type="button" className="shrink-0 rounded-full border border-lake-border bg-surface px-4 py-2 text-xs font-semibold text-arklake-ink shadow-sm" onClick={handleCopyWalletAddress}>
+                      {copyStatus === 'copied' ? 'Copied' : 'Copy'}
+                    </button>
+                  ) : null}
+                </div>
               </div>
               <img className="mx-auto h-auto w-full max-w-[220px] shrink-0 object-contain lg:h-[148px] lg:w-[190px]" src="/app/illustrations/wallet-hero.svg" alt="" aria-hidden="true" />
             </div>
@@ -3033,14 +3049,718 @@ function AppAccountPage({ onNavigate }: { onNavigate: AppNavigateHandler }) {
           <section className="rounded-[2rem] border border-lake-border bg-surface p-6 shadow-sm">
             <h2 className="text-xl font-semibold tracking-[-0.04em] text-arklake-ink">Security</h2>
             <div className="mt-5 divide-y divide-lake-border">
-              <SecurityRow label="Email" status="Coming later" />
+              <SecurityRow label="Email" status="Verified" />
               <SecurityRow label="Passkey" status="Coming later" />
               <SecurityRow label="2FA" status="Coming later" />
             </div>
           </section>
+          <button type="button" className="rounded-full border border-lake-border bg-surface px-5 py-2.5 text-sm font-semibold text-arklake-ink shadow-sm" onClick={onSignOut}>
+            Sign out
+          </button>
         </div>
       </section>
     </AppShell>
+  )
+}
+
+const circleAppId = import.meta.env.VITE_CIRCLE_APP_ID as string | undefined
+const circleOtpRequestEndpoint = import.meta.env.VITE_CIRCLE_OTP_REQUEST_ENDPOINT as string | undefined
+const arklakeSessionEndpoint = '/api/auth/session'
+const arklakeCircleWalletEndpoint = '/api/circle/wallet'
+const arklakeWalletBlockchain = 'ARC-TESTNET'
+const arklakeWalletAccountType = 'SCA'
+
+type CircleAuthStep = 'email' | 'otp' | 'verified'
+type CircleAuthStatus = 'idle' | 'initializing' | 'sending' | 'verifying' | 'checkingWallet' | 'initializingWallet'
+type CircleDebugStatus = 'idle' | 'initializing' | 'ready' | 'sending' | 'otp' | 'verifying' | 'error'
+
+type CircleSdkInstance = Pick<CircleW3SSdk, 'getDeviceId' | 'updateConfigs' | 'verifyOtp' | 'setAuthentication' | 'execute'>
+
+type CircleLoginResult = {
+  userToken?: string
+  encryptionKey?: string
+  refreshToken?: string
+  userID?: string
+}
+
+type CircleWallet = {
+  id?: string
+  address?: string
+  blockchain?: string
+  accountType?: string
+}
+
+type ArklakeWalletIdentity = Required<Pick<CircleWallet, 'id' | 'address' | 'blockchain' | 'accountType'>>
+
+type CircleTokenBalance = {
+  amount: string
+  token: {
+    id: string
+    name?: string
+    symbol?: string
+    blockchain: string
+    tokenAddress?: string
+  }
+}
+
+type ArklakeTokenBalance = {
+  amount: string
+  tokenId: string
+  name?: string
+  symbol: string
+  blockchain: string
+  tokenAddress?: string
+}
+
+type CircleOtpTokens = {
+  deviceToken: string
+  deviceEncryptionKey: string
+  otpToken: string
+}
+
+function isArklakeWallet(wallet: CircleWallet) {
+  return wallet.blockchain === arklakeWalletBlockchain && wallet.accountType === arklakeWalletAccountType
+}
+
+function getArklakeWalletIdentity(wallet: CircleWallet): ArklakeWalletIdentity {
+  if (!wallet.id || !wallet.address || !wallet.blockchain || !wallet.accountType) {
+    throw new Error('Circle wallet response is missing wallet identity fields.')
+  }
+
+  return {
+    id: wallet.id,
+    address: wallet.address,
+    blockchain: wallet.blockchain,
+    accountType: wallet.accountType,
+  }
+}
+
+function normalizeCircleTokenBalance(balance: CircleTokenBalance): ArklakeTokenBalance {
+  if (!balance.amount || !balance.token?.id || !balance.token.blockchain) {
+    throw new Error('Circle balance response is missing token balance fields.')
+  }
+
+  return {
+    amount: balance.amount,
+    tokenId: balance.token.id,
+    name: balance.token.name,
+    symbol: balance.token.symbol || balance.token.name || 'TOKEN',
+    blockchain: balance.token.blockchain,
+    tokenAddress: balance.token.tokenAddress,
+  }
+}
+
+function getUsdcBalance(balances: ArklakeTokenBalance[]) {
+  return balances.find((balance) => balance.symbol.toUpperCase() === 'USDC')
+}
+
+function isValidEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
+}
+
+function CircleEmailOtpDebugPage() {
+  const sdkRef = useRef<CircleSdkInstance | null>(null)
+  const [status, setStatus] = useState<CircleDebugStatus>('idle')
+  const [email, setEmail] = useState('')
+  const [deviceId, setDeviceId] = useState('')
+  const [message, setMessage] = useState('')
+  const [callbackDebug, setCallbackDebug] = useState({
+    fired: 'NO',
+    error: 'NO',
+    result: 'MISSING',
+    userToken: 'NO',
+    encryptionKey: 'NO',
+    refreshToken: 'NO',
+  })
+  const [circleMessageDebug, setCircleMessageDebug] = useState({
+    onEmailLoginVerified: 'NO',
+    onClose: 'NO',
+    onError: 'NO',
+    other: 'NO',
+    lastEvent: 'NONE',
+  })
+
+  const trimmedEmail = email.trim().toLowerCase()
+  const isBusy = status === 'initializing' || status === 'sending' || status === 'verifying'
+
+  const onLoginComplete = (loginError: unknown, result: unknown) => {
+    const safeResult = result as CircleLoginResult | undefined
+    setCallbackDebug({
+      fired: 'YES',
+      error: loginError ? 'YES' : 'NO',
+      result: result ? 'PRESENT' : 'MISSING',
+      userToken: safeResult?.userToken ? 'YES' : 'NO',
+      encryptionKey: safeResult?.encryptionKey ? 'YES' : 'NO',
+      refreshToken: safeResult?.refreshToken ? 'YES' : 'NO',
+    })
+  }
+
+  useEffect(() => {
+    if (!circleAppId) {
+      setStatus('error')
+      setMessage('Missing Circle App ID.')
+      return
+    }
+
+    let isMounted = true
+
+    const messageDebugHandler = (event: MessageEvent) => {
+      if (event.origin !== 'https://pw-auth.circle.com') return
+
+      const data = event.data as Record<string, unknown> | null
+      const hasEmailLoginVerified = !!data?.onEmailLoginVerified
+      const hasClose = !!data?.onClose
+      const hasError = !!data?.onError
+      const lastEvent = hasEmailLoginVerified ? 'onEmailLoginVerified' : hasClose ? 'onClose' : hasError ? 'onError' : 'other'
+
+      setCircleMessageDebug((current) => ({
+        onEmailLoginVerified: hasEmailLoginVerified ? 'YES' : current.onEmailLoginVerified,
+        onClose: hasClose ? 'YES' : current.onClose,
+        onError: hasError ? 'YES' : current.onError,
+        other: lastEvent === 'other' ? 'YES' : current.other,
+        lastEvent,
+      }))
+    }
+
+    window.addEventListener('message', messageDebugHandler)
+
+    const initSdk = async () => {
+      setStatus('initializing')
+      setMessage('')
+
+      try {
+        const circleSdkModule = await import(/* @vite-ignore */ '@circle-fin/w3s-pw-web-sdk')
+        const W3SSdk = circleSdkModule.W3SSdk
+        document.getElementById('sdkIframe')?.remove()
+        ;(W3SSdk as unknown as { instance: unknown }).instance = null
+        const sdk = new W3SSdk({ appSettings: { appId: circleAppId } }, onLoginComplete)
+        sdk.updateConfigs({ appSettings: { appId: circleAppId } }, onLoginComplete)
+        const nextDeviceId = await sdk.getDeviceId()
+        if (!isMounted) return
+
+        sdkRef.current = sdk
+        setDeviceId(nextDeviceId)
+        setStatus('ready')
+      } catch (debugError) {
+        if (!isMounted) return
+        setStatus('error')
+        setMessage(debugError instanceof Error ? debugError.message : 'Unable to initialize Circle SDK.')
+      }
+    }
+
+    void initSdk()
+
+    return () => {
+      isMounted = false
+      window.removeEventListener('message', messageDebugHandler)
+    }
+  }, [])
+
+  const requestOtp = async () => {
+    if (!circleAppId || !circleOtpRequestEndpoint || !sdkRef.current) {
+      setStatus('error')
+      setMessage('Circle debug page is not ready yet.')
+      return
+    }
+    if (!isValidEmail(trimmedEmail)) {
+      setMessage('Enter a valid email address.')
+      return
+    }
+
+    setStatus('sending')
+    setMessage('')
+    setCallbackDebug({
+      fired: 'NO',
+      error: 'NO',
+      result: 'MISSING',
+      userToken: 'NO',
+      encryptionKey: 'NO',
+      refreshToken: 'NO',
+    })
+
+    try {
+      const response = await fetch(circleOtpRequestEndpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deviceId, email: trimmedEmail }),
+      })
+
+      if (!response.ok) throw new Error(`OTP request failed (${response.status}).`)
+
+      const data = await response.json() as Partial<CircleOtpTokens>
+      if (!data.deviceToken || !data.deviceEncryptionKey || !data.otpToken) {
+        throw new Error('OTP response is missing Circle login tokens.')
+      }
+
+      sdkRef.current.updateConfigs({
+        appSettings: { appId: circleAppId },
+        loginConfigs: {
+          deviceToken: data.deviceToken,
+          deviceEncryptionKey: data.deviceEncryptionKey,
+          otpToken: data.otpToken,
+        },
+      }, onLoginComplete)
+      setStatus('otp')
+    } catch (debugError) {
+      setStatus('error')
+      setMessage(debugError instanceof Error ? debugError.message : 'Unable to request Circle Email OTP.')
+    }
+  }
+
+  const verifyOtp = () => {
+    if (!sdkRef.current || status !== 'otp') return
+    setStatus('verifying')
+    setMessage('')
+    sdkRef.current.verifyOtp()
+  }
+
+  return (
+    <main className="min-h-screen bg-lake-canvas text-deep-text">
+      <section className={`${shellWidth} grid min-h-screen place-items-center py-10`}>
+        <div className="w-full max-w-[560px] rounded-[2rem] border border-lake-border bg-surface p-6 shadow-sm sm:p-8">
+          <a href="/" className="inline-flex text-arklake-ink"><ProductMark /></a>
+          <p className="mt-8 text-xs font-semibold uppercase tracking-[0.18em] text-slate">Local debug only</p>
+          <h1 className="mt-3 text-3xl font-semibold tracking-[-0.055em] text-arklake-ink sm:text-4xl">Circle Email OTP harness</h1>
+          <p className="mt-4 text-sm leading-6 text-slate">Minimal Circle Web SDK Email OTP flow. It only displays safe callback flags.</p>
+
+          <div className="mt-7 space-y-5">
+            <label className="block">
+              <span className="text-sm font-semibold text-arklake-ink">Email</span>
+              <input
+                className="mt-2 w-full rounded-2xl border border-lake-border bg-lake-canvas px-4 py-3 text-sm font-semibold text-arklake-ink outline-none transition placeholder:text-slate/70 focus:border-arklake-aqua focus:ring-4 focus:ring-arklake-aqua/15 disabled:opacity-60"
+                type="email"
+                inputMode="email"
+                autoComplete="email"
+                placeholder="you@example.com"
+                value={email}
+                disabled={status === 'sending'}
+                onChange={(event) => setEmail(event.target.value)}
+              />
+            </label>
+
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <button type="button" className="rounded-full bg-arklake-ink px-5 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50" disabled={status === 'sending' || !deviceId || !isValidEmail(trimmedEmail)} onClick={requestOtp}>
+                {status === 'sending' ? 'Requesting OTP…' : 'Request OTP'}
+              </button>
+              <button type="button" className="rounded-full border border-lake-border bg-surface px-5 py-2.5 text-sm font-semibold text-arklake-ink disabled:cursor-not-allowed disabled:opacity-50" disabled={status !== 'otp'} onClick={verifyOtp}>
+                {status === 'verifying' ? 'Opening Circle…' : 'Verify OTP'}
+              </button>
+            </div>
+
+            <div className="rounded-2xl border border-lake-border bg-lake-canvas px-4 py-3 text-xs font-semibold text-slate">
+              <p>SDK status: {status}</p>
+              <p>deviceId: {deviceId ? 'PRESENT' : 'MISSING'}</p>
+              <p>callback fired: {callbackDebug.fired}</p>
+              <p>error: {callbackDebug.error}</p>
+              <p>result: {callbackDebug.result}</p>
+              <p>userToken: {callbackDebug.userToken}</p>
+              <p>encryptionKey: {callbackDebug.encryptionKey}</p>
+              <p>refreshToken: {callbackDebug.refreshToken}</p>
+              <p>message onEmailLoginVerified: {circleMessageDebug.onEmailLoginVerified}</p>
+              <p>message onClose: {circleMessageDebug.onClose}</p>
+              <p>message onError: {circleMessageDebug.onError}</p>
+              <p>message other: {circleMessageDebug.other}</p>
+              <p>message lastEvent: {circleMessageDebug.lastEvent}</p>
+            </div>
+
+            {message ? <p className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{message}</p> : null}
+          </div>
+        </div>
+      </section>
+    </main>
+  )
+}
+
+function AuthPage({ onSignedIn }: { onSignedIn: (wallet: ArklakeWalletIdentity, balances: ArklakeTokenBalance[], email: string) => void }) {
+  const sdkRef = useRef<CircleSdkInstance | null>(null)
+  const [step, setStep] = useState<CircleAuthStep>('email')
+  const [status, setStatus] = useState<CircleAuthStatus>('idle')
+  const [email, setEmail] = useState('')
+  const [deviceId, setDeviceId] = useState('')
+  const [otpTokens, setOtpTokens] = useState<CircleOtpTokens | null>(null)
+  const [loginResult, setLoginResult] = useState<CircleLoginResult | null>(null)
+  const [error, setError] = useState('')
+  const [resendCooldown, setResendCooldown] = useState(0)
+  const [circleCallbackDebug, setCircleCallbackDebug] = useState({
+    fired: false,
+    error: 'NO',
+    result: 'MISSING',
+    userToken: 'NO',
+    encryptionKey: 'NO',
+    refreshToken: 'NO',
+  })
+  const [walletChallengeDebug, setWalletChallengeDebug] = useState({
+    initializeChallengeId: 'NO',
+    setAuthentication: 'NO',
+    callback: 'NO',
+    error: 'NO',
+    result: 'MISSING',
+    status: 'MISSING',
+  })
+  const statusRef = useRef(status)
+
+  useEffect(() => {
+    statusRef.current = status
+  }, [status])
+
+  const isBusy = status === 'sending' || status === 'verifying'
+  const trimmedEmail = email.trim().toLowerCase()
+  const canSendOtp = Boolean(isValidEmail(trimmedEmail) && deviceId && !isBusy)
+  const canRetryOtp = Boolean(otpTokens && !isBusy)
+  const canResendOtp = Boolean(isValidEmail(trimmedEmail) && !isBusy && resendCooldown === 0)
+
+  const createArklakeSession = async (result: CircleLoginResult, wallet: ArklakeWalletIdentity) => {
+    const response = await fetch(arklakeSessionEndpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        email: trimmedEmail,
+        userToken: result.userToken,
+        refreshToken: result.refreshToken,
+        deviceId,
+        wallet,
+      }),
+    })
+
+    if (!response.ok) throw new Error('Unable to create Arklake session.')
+  }
+
+  const listArklakeWallets = async (userToken: string) => {
+    const response = await fetch(arklakeCircleWalletEndpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'listWallets', userToken }),
+    })
+
+    if (!response.ok) throw new Error(`Circle wallet lookup failed (${response.status}).`)
+
+    const data = await response.json() as { wallets?: CircleWallet[] }
+    if (!Array.isArray(data.wallets)) throw new Error('Circle wallet lookup returned an invalid response.')
+
+    return data.wallets
+  }
+
+  const listArklakeWalletBalances = async (userToken: string, walletId: string) => {
+    const response = await fetch(arklakeCircleWalletEndpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'listBalances', userToken, walletId }),
+    })
+
+    if (!response.ok) throw new Error(`Circle wallet balance lookup failed (${response.status}).`)
+
+    const data = await response.json() as { tokenBalances?: CircleTokenBalance[] }
+    if (!Array.isArray(data.tokenBalances)) throw new Error('Circle wallet balance lookup returned an invalid response.')
+
+    return data.tokenBalances.map(normalizeCircleTokenBalance)
+  }
+
+  const initializeArklakeWallet = async (result: Required<Pick<CircleLoginResult, 'userToken' | 'encryptionKey'>>) => {
+    setStatus('checkingWallet')
+
+    const existingWallet = (await listArklakeWallets(result.userToken)).find(isArklakeWallet)
+    if (existingWallet) return getArklakeWalletIdentity(existingWallet)
+
+    const initializeResponse = await fetch(arklakeCircleWalletEndpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'initializeUser', userToken: result.userToken }),
+    })
+
+    if (!initializeResponse.ok) throw new Error(`Circle wallet initialization failed (${initializeResponse.status}).`)
+
+    const initializeData = await initializeResponse.json() as { challengeId?: string }
+    if (!initializeData.challengeId) throw new Error('Circle wallet initialization did not return a challenge.')
+
+    setWalletChallengeDebug({
+      initializeChallengeId: 'YES',
+      setAuthentication: 'NO',
+      callback: 'NO',
+      error: 'NO',
+      result: 'MISSING',
+      status: 'MISSING',
+    })
+    setStatus('initializingWallet')
+    sdkRef.current?.setAuthentication({ userToken: result.userToken, encryptionKey: result.encryptionKey })
+    setWalletChallengeDebug((debug) => ({ ...debug, setAuthentication: 'YES' }))
+
+    await new Promise<void>((resolve, reject) => {
+      sdkRef.current?.execute(initializeData.challengeId as string, (challengeError, challengeResult) => {
+        const safeStatus = typeof challengeResult?.status === 'string' ? challengeResult.status : 'MISSING'
+        setWalletChallengeDebug((debug) => ({
+          ...debug,
+          callback: 'YES',
+          error: challengeError ? 'YES' : 'NO',
+          result: challengeResult ? 'PRESENT' : 'MISSING',
+          status: safeStatus,
+        }))
+        console.info('CIRCLE_WALLET_CHALLENGE_CALLBACK', {
+          error: challengeError ? 'YES' : 'NO',
+          result: challengeResult ? 'PRESENT' : 'MISSING',
+          status: safeStatus,
+        })
+
+        if (challengeError) {
+          reject(new Error(challengeError.message || 'Circle wallet challenge failed.'))
+          return
+        }
+
+        if (challengeResult?.status !== 'COMPLETE') {
+          reject(new Error('Circle wallet challenge did not complete.'))
+          return
+        }
+
+        resolve()
+      })
+    })
+
+    setStatus('checkingWallet')
+
+    const updatedWallet = (await listArklakeWallets(result.userToken)).find(isArklakeWallet)
+    if (!updatedWallet) throw new Error('Circle wallet was not found after initialization.')
+
+    return getArklakeWalletIdentity(updatedWallet)
+  }
+
+  const onLoginComplete = (loginError: unknown, result: unknown) => {
+    const callbackDebug = {
+      error: loginError ? 'YES' : 'NO',
+      result: result ? 'PRESENT' : 'MISSING',
+      hasUserToken: (result as CircleLoginResult | undefined)?.userToken ? 'YES' : 'NO',
+      hasEncryptionKey: (result as CircleLoginResult | undefined)?.encryptionKey ? 'YES' : 'NO',
+      hasRefreshToken: (result as CircleLoginResult | undefined)?.refreshToken ? 'YES' : 'NO',
+    }
+    console.info('CIRCLE_LOGIN_CALLBACK_FIRED', callbackDebug)
+
+    setCircleCallbackDebug({
+      fired: true,
+      error: callbackDebug.error,
+      result: callbackDebug.result,
+      userToken: callbackDebug.hasUserToken,
+      encryptionKey: callbackDebug.hasEncryptionKey,
+      refreshToken: callbackDebug.hasRefreshToken,
+    })
+
+    if (loginError) {
+      setStatus('idle')
+      setError(loginError instanceof Error ? loginError.message : 'Circle OTP verification failed.')
+      return
+    }
+
+    const safeResult = result as CircleLoginResult | undefined
+    if (!safeResult?.userToken || !safeResult?.encryptionKey || !safeResult?.refreshToken) {
+      setStatus('idle')
+      setError('Circle OTP verification did not return a complete login result.')
+      return
+    }
+
+      setLoginResult(safeResult)
+      setStep('verified')
+      setError('')
+      void initializeArklakeWallet(safeResult as Required<Pick<CircleLoginResult, 'userToken' | 'encryptionKey'>>).then((wallet) => {
+        return listArklakeWalletBalances(safeResult.userToken as string, wallet.id).then((balances) => ({ wallet, balances }))
+      }).then(({ wallet, balances }) => {
+        return createArklakeSession(safeResult, wallet).then(() => ({ wallet, balances }))
+      }).then(({ wallet, balances }) => {
+        setStatus('idle')
+        onSignedIn(wallet, balances, trimmedEmail)
+      }).catch((sessionError) => {
+        setStatus('idle')
+        setError(sessionError instanceof Error ? sessionError.message : 'Unable to prepare Circle wallet.')
+      })
+    }
+
+  useEffect(() => {
+    if (!circleAppId) return
+
+    let isMounted = true
+
+    const initCircleSdk = async () => {
+      setStatus('initializing')
+      setError('')
+
+      try {
+        const circleSdkModule = await import(/* @vite-ignore */ '@circle-fin/w3s-pw-web-sdk')
+        const W3SSdk = circleSdkModule.W3SSdk
+        document.getElementById('sdkIframe')?.remove()
+        ;(W3SSdk as unknown as { instance: unknown }).instance = null
+        const sdk = new W3SSdk({ appSettings: { appId: circleAppId } }, onLoginComplete)
+        sdk.updateConfigs({ appSettings: { appId: circleAppId } }, onLoginComplete)
+
+        const nextDeviceId = await sdk.getDeviceId()
+        if (!isMounted) return
+
+        sdkRef.current = sdk
+        setDeviceId(nextDeviceId)
+        setStatus('idle')
+      } catch (sdkError) {
+        if (!isMounted) return
+
+        setStatus('idle')
+        setError(sdkError instanceof Error ? sdkError.message : 'Unable to initialize Circle Web SDK.')
+      }
+    }
+
+    const handleCircleMessage = (event: MessageEvent) => {
+      if (event.origin !== 'https://pw-auth.circle.com') return
+
+      const data = event.data as Record<string, unknown> | null
+      if (data?.onClose && statusRef.current === 'verifying') {
+        setStatus('idle')
+      }
+    }
+
+    window.addEventListener('message', handleCircleMessage)
+    void initCircleSdk()
+
+    return () => {
+      isMounted = false
+      window.removeEventListener('message', handleCircleMessage)
+      document.getElementById('sdkIframe')?.remove()
+    }
+  }, [])
+
+  useEffect(() => {
+    if (resendCooldown <= 0) return
+
+    const intervalId = window.setInterval(() => {
+      setResendCooldown((seconds) => Math.max(0, seconds - 1))
+    }, 1000)
+
+    return () => window.clearInterval(intervalId)
+  }, [resendCooldown])
+
+  const openOtpModal = (tokens: CircleOtpTokens) => {
+    if (!circleAppId || !sdkRef.current) return
+
+    sdkRef.current.updateConfigs({
+      appSettings: { appId: circleAppId },
+      loginConfigs: tokens,
+    }, onLoginComplete)
+    setStatus('verifying')
+    console.info('CIRCLE_VERIFY_OTP_OPEN')
+    sdkRef.current.verifyOtp()
+  }
+
+  const requestOtp = async () => {
+    if (!circleAppId || !circleOtpRequestEndpoint) {
+      setError('Sign in is not ready yet.')
+      return
+    }
+    if (!isValidEmail(trimmedEmail)) {
+      setError('Enter a valid email address.')
+      return
+    }
+    if (!deviceId) {
+      setError('Circle device session is not ready yet.')
+      return
+    }
+
+    setStatus('sending')
+    setError('')
+
+    try {
+      const response = await fetch(circleOtpRequestEndpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deviceId, email: trimmedEmail }),
+      })
+
+      if (!response.ok) throw new Error(`OTP request failed (${response.status}).`)
+
+      const data = await response.json() as Partial<CircleOtpTokens>
+      if (!data.deviceToken || !data.deviceEncryptionKey || !data.otpToken) {
+        throw new Error('OTP response is missing Circle login tokens.')
+      }
+
+      const nextTokens = {
+        deviceToken: data.deviceToken,
+        deviceEncryptionKey: data.deviceEncryptionKey,
+        otpToken: data.otpToken,
+      }
+
+      setOtpTokens(nextTokens)
+      setStep('otp')
+      setResendCooldown(60)
+      openOtpModal(nextTokens)
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to send Circle Email OTP.')
+      setStatus('idle')
+    }
+  }
+
+  return (
+    <main className="min-h-screen bg-lake-canvas text-deep-text">
+      <section className={`${shellWidth} grid min-h-screen place-items-center py-10`}>
+        <div className="w-full max-w-[520px] rounded-[2rem] border border-lake-border bg-surface p-6 shadow-sm sm:p-8">
+          <a href="/" className="inline-flex text-arklake-ink"><ProductMark /></a>
+          <h1 className="mt-8 text-3xl font-semibold tracking-[-0.055em] text-arklake-ink sm:text-4xl">Sign in to Arklake</h1>
+          <p className="mt-4 text-sm leading-6 text-slate">Enter your email to continue.</p>
+
+          <div className="mt-7 space-y-5">
+            <label className="block">
+              <span className="text-sm font-semibold text-arklake-ink">Email</span>
+              <input
+                className="mt-2 w-full rounded-2xl border border-lake-border bg-lake-canvas px-4 py-3 text-sm font-semibold text-arklake-ink outline-none transition placeholder:text-slate/70 focus:border-arklake-aqua focus:ring-4 focus:ring-arklake-aqua/15 disabled:opacity-60"
+                type="email"
+                inputMode="email"
+                autoComplete="email"
+                placeholder="you@example.com"
+                value={email}
+                disabled={step !== 'email' || isBusy}
+                onChange={(event) => setEmail(event.target.value)}
+              />
+            </label>
+
+            {step === 'email' ? (
+              <button type="button" className="w-full rounded-full bg-arklake-ink px-6 py-3 text-sm font-semibold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-50" disabled={!canSendOtp} onClick={requestOtp}>
+                {status === 'sending' ? 'Sending code…' : !deviceId ? 'Preparing Circle…' : 'Send code'}
+              </button>
+            ) : null}
+
+            {step === 'otp' ? (
+              <div className="rounded-[1.5rem] border border-aqua-mist bg-aqua-mist p-5">
+                <p className="text-sm font-semibold text-arklake-ink">OTP sent</p>
+                <p className="mt-2 text-sm leading-6 text-slate">Circle will collect and verify the OTP in its hosted UI. Arklake does not receive or store the OTP value.</p>
+                <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+                  <button type="button" className="rounded-full bg-arklake-ink px-5 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50" disabled={!canRetryOtp} onClick={() => otpTokens ? openOtpModal(otpTokens) : undefined}>
+                    {status === 'verifying' ? 'Circle is open…' : 'Open OTP modal'}
+                  </button>
+                  <button type="button" className="rounded-full border border-lake-border bg-surface px-5 py-2.5 text-sm font-semibold text-arklake-ink disabled:cursor-not-allowed disabled:opacity-50" disabled={!canResendOtp} onClick={requestOtp}>
+                    {resendCooldown > 0 ? `Resend code in ${resendCooldown}s` : 'Resend code'}
+                  </button>
+                </div>
+                <div className="mt-4 rounded-2xl border border-lake-border bg-surface px-4 py-3 text-xs font-semibold text-slate">
+                  <p>Circle callback: {circleCallbackDebug.fired ? 'fired' : 'waiting'}</p>
+                  {circleCallbackDebug.fired ? (
+                    <div className="mt-2 space-y-1">
+                      <p>error: {circleCallbackDebug.error}</p>
+                      <p>result: {circleCallbackDebug.result}</p>
+                      <p>userToken: {circleCallbackDebug.userToken}</p>
+                      <p>encryptionKey: {circleCallbackDebug.encryptionKey}</p>
+                      <p>refreshToken: {circleCallbackDebug.refreshToken}</p>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+
+            {step === 'verified' ? (
+              <div className="rounded-[1.5rem] border border-aqua-mist bg-aqua-mist p-5">
+                <p className="text-sm font-semibold text-arklake-ink">Email verified</p>
+                <p className="mt-2 text-sm leading-6 text-slate">Your email has been verified successfully.</p>
+                {status === 'checkingWallet' ? <p className="mt-2 text-sm leading-6 text-slate">Checking your Circle wallet…</p> : null}
+                {status === 'initializingWallet' ? <p className="mt-2 text-sm leading-6 text-slate">Complete Circle wallet setup to continue.</p> : null}
+              </div>
+            ) : null}
+
+            {error ? <p className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{error}</p> : null}
+
+          </div>
+        </div>
+      </section>
+    </main>
   )
 }
 
@@ -3050,11 +3770,39 @@ export default function App() {
   const [runtimeInvoices, setRuntimeInvoices] = useState<RuntimeInvoice[]>([])
   const [hasHydratedRuntimeInvoices, setHasHydratedRuntimeInvoices] = useState(false)
   const [currentPath, setCurrentPath] = useState(window.location.pathname)
+  const [sessionStatus, setSessionStatus] = useState<'checking' | 'authenticated' | 'anonymous'>('checking')
+  const [arklakeWallet, setArklakeWallet] = useState<ArklakeWalletIdentity | null>(null)
+  const [arklakeBalances, setArklakeBalances] = useState<ArklakeTokenBalance[]>([])
+  const [arklakeEmail, setArklakeEmail] = useState('')
   const [, setRuntimeInvoiceStatusTick] = useState(0)
+
+  const checkSession = async () => {
+    try {
+      const response = await fetch(arklakeSessionEndpoint, { credentials: 'include' })
+      const data = await response.json() as { authenticated?: boolean; email?: string; wallet?: ArklakeWalletIdentity; balances?: ArklakeTokenBalance[] }
+      if (data.authenticated && data.email && data.wallet && Array.isArray(data.balances)) {
+        setArklakeEmail(data.email)
+        setArklakeWallet(data.wallet)
+        setArklakeBalances(data.balances)
+        setSessionStatus('authenticated')
+        return true
+      }
+
+      setArklakeEmail('')
+      setArklakeWallet(null)
+      setArklakeBalances([])
+      setSessionStatus('anonymous')
+      return false
+    } catch {
+      setSessionStatus('anonymous')
+      return false
+    }
+  }
 
   useEffect(() => {
     setRuntimeInvoices(loadRuntimeInvoices())
     setHasHydratedRuntimeInvoices(true)
+    void checkSession()
   }, [])
 
   useEffect(() => {
@@ -3100,13 +3848,39 @@ export default function App() {
     setCurrentPath(path)
   }
 
+  const handleSignedIn = (wallet: ArklakeWalletIdentity, balances: ArklakeTokenBalance[], email: string) => {
+    setArklakeWallet(wallet)
+    setArklakeBalances(balances)
+    setArklakeEmail(email)
+    setSessionStatus('authenticated')
+    handleAppNavigate('/app')
+  }
+
+  const handleSignOut = () => {
+    void fetch(arklakeSessionEndpoint, { method: 'DELETE', credentials: 'include' }).finally(() => {
+      setArklakeWallet(null)
+      setArklakeBalances([])
+      setArklakeEmail('')
+      setSessionStatus('anonymous')
+      handleAppNavigate('/')
+    })
+  }
+
   const invoiceDetailId = currentPath.startsWith('/app/invoices/') && currentPath !== '/app/invoices/create'
     ? currentPath.slice('/app/invoices/'.length)
     : null
   const selectedInvoice = invoiceDetailId ? runtimeInvoices.find((invoice) => invoice.id === invoiceDetailId) : undefined
 
+  if (currentPath.startsWith('/app') && sessionStatus === 'checking') {
+    return <main className="grid min-h-screen place-items-center bg-lake-canvas text-sm font-semibold text-slate">Checking session…</main>
+  }
+
+  if (currentPath.startsWith('/app') && sessionStatus !== 'authenticated') {
+    return <AppRedirect to="/" onNavigate={setCurrentPath} />
+  }
+
   if (currentPath === '/app') {
-    return <AppHomePage onNavigate={handleAppNavigate} />
+    return <AppHomePage onNavigate={handleAppNavigate} balances={arklakeBalances} />
   }
 
   if (currentPath === '/app/invoices') {
@@ -3123,7 +3897,7 @@ export default function App() {
   }
 
   if (currentPath === '/app/wallet') {
-    return <AppWalletPage onNavigate={handleAppNavigate} />
+    return <AppWalletPage onNavigate={handleAppNavigate} balances={arklakeBalances} />
   }
 
   if (currentPath === '/app/swap') {
@@ -3131,7 +3905,15 @@ export default function App() {
   }
 
   if (currentPath === '/app/account') {
-    return <AppAccountPage onNavigate={handleAppNavigate} />
+    return <AppAccountPage onNavigate={handleAppNavigate} onSignOut={handleSignOut} wallet={arklakeWallet} email={arklakeEmail} />
+  }
+
+  if (window.location.pathname === '/auth/sign-in') {
+    return <AuthPage onSignedIn={handleSignedIn} />
+  }
+
+  if (window.location.pathname === '/debug/circle-email-otp') {
+    return <CircleEmailOtpDebugPage />
   }
 
   if (window.location.pathname === '/docs/getting-started') {
@@ -3216,8 +3998,8 @@ export default function App() {
           </nav>
 
           <div className="hidden items-center gap-3 sm:flex">
-          <a className="hidden text-sm font-semibold text-arklake-ink sm:inline-flex" href="#">Sign in</a>
-          <a className="rounded-full bg-arklake-ink px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-deep-text" href="#">
+          <a className="hidden text-sm font-semibold text-arklake-ink sm:inline-flex" href="/auth/sign-in">Sign in</a>
+          <a className="rounded-full bg-arklake-ink px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-deep-text" href="/auth/sign-in">
             Get started
           </a>
           </div>
@@ -3284,10 +4066,10 @@ export default function App() {
                 How it works
               </a>
               <a className="rounded-[1.15rem] px-4 py-3 text-sm font-semibold text-slate" href="/docs">Docs</a>
-              <span className="rounded-[1.15rem] px-4 py-3 text-sm font-semibold text-arklake-ink">Sign in</span>
-              <span className="mt-2 inline-flex w-full items-center justify-center rounded-full bg-arklake-ink px-6 py-3 text-sm font-semibold text-white shadow-sm">
+              <a className="rounded-[1.15rem] px-4 py-3 text-sm font-semibold text-arklake-ink" href="/auth/sign-in">Sign in</a>
+              <a className="mt-2 inline-flex w-full items-center justify-center rounded-full bg-arklake-ink px-6 py-3 text-sm font-semibold text-white shadow-sm" href="/auth/sign-in">
                 Get started
-              </span>
+              </a>
             </div>
           </nav>
         ) : null}
@@ -3309,10 +4091,10 @@ export default function App() {
           </p>
 
           <div className="mt-8 flex w-full flex-col gap-3 sm:w-auto sm:flex-row">
-            <a className="inline-flex w-full items-center justify-center rounded-full bg-arklake-ink px-6 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-deep-text hover:ring-4 hover:ring-arklake-aqua/15 sm:w-auto" href="#">
+            <a className="inline-flex w-full items-center justify-center rounded-full bg-arklake-ink px-6 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-deep-text hover:ring-4 hover:ring-arklake-aqua/15 sm:w-auto" href="/auth/sign-in">
               Get started
             </a>
-            <a className="inline-flex w-full items-center justify-center rounded-full border border-lake-border bg-surface px-6 py-3 text-sm font-semibold text-arklake-ink transition hover:border-arklake-aqua sm:w-auto" href="#">
+            <a className="inline-flex w-full items-center justify-center rounded-full border border-lake-border bg-surface px-6 py-3 text-sm font-semibold text-arklake-ink transition hover:border-arklake-aqua sm:w-auto" href="/auth/sign-in">
               Sign in
             </a>
           </div>
