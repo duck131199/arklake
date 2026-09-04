@@ -3229,7 +3229,7 @@ function CircleEmailOtpDebugPage() {
       setMessage('')
 
       try {
-        const circleSdkModule = await import(/* @vite-ignore */ '@circle-fin/w3s-pw-web-sdk')
+        const circleSdkModule = await import('@circle-fin/w3s-pw-web-sdk')
         const W3SSdk = circleSdkModule.W3SSdk
         document.getElementById('sdkIframe')?.remove()
         ;(W3SSdk as unknown as { instance: unknown }).instance = null
@@ -3581,7 +3581,7 @@ function AuthPage({ onSignedIn }: { onSignedIn: (wallet: ArklakeWalletIdentity, 
       setError('')
 
       try {
-        const circleSdkModule = await import(/* @vite-ignore */ '@circle-fin/w3s-pw-web-sdk')
+        const circleSdkModule = await import('@circle-fin/w3s-pw-web-sdk')
         const W3SSdk = circleSdkModule.W3SSdk
         document.getElementById('sdkIframe')?.remove()
         ;(W3SSdk as unknown as { instance: unknown }).instance = null
