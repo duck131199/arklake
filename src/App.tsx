@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { QRCodeSVG } from 'qrcode.react'
 import type { W3SSdk as CircleW3SSdk } from '@circle-fin/w3s-pw-web-sdk'
 
 const shellWidth = 'site-shell'
@@ -1961,8 +1962,61 @@ function AppShell({ activeItem, title, subtitle, children, onNavigate }: { activ
   )
 }
 
-function AppHomePage({ onNavigate, balances }: { onNavigate: AppNavigateHandler; balances: ArklakeTokenBalance[] }) {
+function ReceiveFlow({ wallet, onClose }: { wallet: ArklakeWalletIdentity | null; onClose: () => void }) {
+  const [copyStatus, setCopyStatus] = useState<'idle' | 'copied'>('idle')
+  const walletAddress = wallet?.address?.trim()
+
+  const handleCopyAddress = async () => {
+    if (!walletAddress) return
+
+    await navigator.clipboard.writeText(walletAddress)
+    setCopyStatus('copied')
+    window.setTimeout(() => setCopyStatus('idle'), 1600)
+  }
+
+  return (
+    <section className="rounded-[2rem] border border-lake-border bg-surface p-6 shadow-sm" aria-labelledby="receive-usdc-title">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-arklake-aqua">Receive</p>
+          <h2 id="receive-usdc-title" className="mt-2 text-2xl font-semibold tracking-[-0.05em] text-arklake-ink">Receive USDC</h2>
+          <p className="mt-2 text-sm font-semibold text-slate">Network: Arc Testnet</p>
+        </div>
+        <button type="button" className="rounded-full border border-lake-border bg-surface px-4 py-2 text-xs font-semibold text-arklake-ink shadow-sm" onClick={onClose}>
+          Close
+        </button>
+      </div>
+
+      <div className="mt-5 rounded-[1.5rem] border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold leading-6 text-amber-800">
+        Arc Testnet only. Send only testnet USDC on Arc Testnet to this address.
+      </div>
+
+      {walletAddress ? (
+        <div className="mt-5 grid gap-5 lg:grid-cols-[220px_minmax(0,1fr)] lg:items-start">
+          <div className="h-[220px] w-[220px] rounded-[1.25rem] border border-lake-border bg-white p-3 shadow-sm" aria-label="QR code for this Circle wallet address">
+            <QRCodeSVG value={walletAddress} size={196} level="M" includeMargin={false} />
+          </div>
+          <div className="min-w-0 rounded-[1.5rem] border border-lake-border bg-lake-canvas p-5">
+            <p className="text-sm font-semibold text-slate">Circle wallet address</p>
+            <p className="mt-3 break-all text-lg font-semibold tracking-[-0.035em] text-arklake-ink [overflow-wrap:anywhere]">{walletAddress}</p>
+            <button type="button" className="mt-5 rounded-full bg-arklake-ink px-5 py-2.5 text-sm font-semibold text-white shadow-sm" onClick={handleCopyAddress}>
+              {copyStatus === 'copied' ? 'Copied' : 'Copy address'}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="mt-5 rounded-[1.5rem] border border-dashed border-lake-border bg-lake-canvas px-5 py-8 text-center">
+          <p className="font-semibold text-arklake-ink">No wallet address available</p>
+          <p className="mt-2 text-sm leading-6 text-slate">Arklake could not find a Circle wallet address for this session yet.</p>
+        </div>
+      )}
+    </section>
+  )
+}
+
+function AppHomePage({ onNavigate, balances, wallet }: { onNavigate: AppNavigateHandler; balances: ArklakeTokenBalance[]; wallet: ArklakeWalletIdentity | null }) {
   const usdcBalance = getUsdcBalance(balances)
+  const [isReceiveOpen, setIsReceiveOpen] = useState(false)
 
   return (
     <AppShell activeItem="Home" title="Home" subtitle="Your account overview." onNavigate={onNavigate}>
@@ -1983,15 +2037,15 @@ function AppHomePage({ onNavigate, balances }: { onNavigate: AppNavigateHandler;
               </div>
 
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
-                <div className="min-h-[148px] rounded-[1.75rem] border border-lake-border bg-surface p-5 shadow-sm">
+                <button type="button" className="min-h-[148px] rounded-[1.75rem] border border-lake-border bg-surface p-5 text-left shadow-sm" onClick={() => setIsReceiveOpen(true)}>
                   <div className="flex h-11 w-11 items-center justify-center rounded-full bg-aqua-mist text-arklake-aqua">
                     <svg className="h-5 w-5" viewBox="0 0 20 20" fill="none" aria-hidden="true">
                       <path d="M10 4.5v10M6.25 10.75 10 14.5l3.75-3.75" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
                     </svg>
                   </div>
                   <h2 className="mt-4 text-xl font-semibold tracking-[-0.04em] text-arklake-ink">Receive</h2>
-                  <p className="mt-1 text-sm leading-6 text-slate">Receive support coming next</p>
-                </div>
+                  <p className="mt-1 text-sm leading-6 text-slate">Receive USDC on Arc Testnet</p>
+                </button>
 
                 <div className="min-h-[148px] rounded-[1.75rem] border border-aqua-mist bg-aqua-mist p-5 shadow-sm">
                   <div className="flex h-11 w-11 items-center justify-center rounded-full bg-white text-arklake-aqua">
@@ -2004,6 +2058,8 @@ function AppHomePage({ onNavigate, balances }: { onNavigate: AppNavigateHandler;
                 </div>
               </div>
             </section>
+
+            {isReceiveOpen ? <div className="mt-6"><ReceiveFlow wallet={wallet} onClose={() => setIsReceiveOpen(false)} /></div> : null}
 
             <section className="mt-6 rounded-[2rem] border border-lake-border bg-surface p-6 shadow-sm">
               <div className="flex items-center justify-between">
@@ -2703,8 +2759,10 @@ function TokenIcon({ symbol, icon }: { symbol: string; icon?: string }) {
   )
 }
 
-function AppWalletPage({ onNavigate, balances }: { onNavigate: AppNavigateHandler; balances: ArklakeTokenBalance[] }) {
+function AppWalletPage({ onNavigate, balances, wallet }: { onNavigate: AppNavigateHandler; balances: ArklakeTokenBalance[]; wallet: ArklakeWalletIdentity | null }) {
   const usdcBalance = getUsdcBalance(balances)
+  const userFacingBalances = getUserFacingBalances(balances)
+  const [isReceiveOpen, setIsReceiveOpen] = useState(false)
 
   return (
     <AppShell activeItem="Wallet" title="Wallet" subtitle="Your money in Arklake." onNavigate={onNavigate}>
@@ -2722,23 +2780,23 @@ function AppWalletPage({ onNavigate, balances }: { onNavigate: AppNavigateHandle
         <div className="grid gap-4 xl:grid-cols-1">
           <div className="rounded-[1.75rem] border border-lake-border bg-surface p-5 shadow-sm">
             <p className="text-sm font-semibold text-slate">Assets</p>
-            <p className="mt-4 text-3xl font-semibold tracking-[-0.055em] text-arklake-ink">{balances.length}</p>
+            <p className="mt-4 text-3xl font-semibold tracking-[-0.055em] text-arklake-ink">{userFacingBalances.length}</p>
             <p className="mt-2 text-sm leading-6 text-slate">Token balances reported by Circle</p>
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-2">
-            <div className="min-h-[128px] rounded-[1.75rem] border border-lake-border bg-surface p-5 shadow-sm">
+            <button type="button" className="min-h-[128px] rounded-[1.75rem] border border-lake-border bg-surface p-5 text-left shadow-sm" onClick={() => setIsReceiveOpen(true)}>
               <div className="flex items-start justify-between gap-3">
                 <div className="flex h-10 w-10 items-center justify-center rounded-full bg-aqua-mist text-arklake-aqua">
                   <svg className="h-5 w-5" viewBox="0 0 20 20" fill="none" aria-hidden="true">
                     <path d="M10 4.5v10M6.25 10.75 10 14.5l3.75-3.75" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
                 </div>
-                <span className="rounded-full border border-lake-border bg-lake-canvas px-2.5 py-1 text-xs font-semibold text-slate">Coming later</span>
+                <span className="rounded-full border border-lake-border bg-lake-canvas px-2.5 py-1 text-xs font-semibold text-slate">Arc Testnet</span>
               </div>
               <h2 className="mt-4 text-lg font-semibold tracking-[-0.04em] text-arklake-ink">Receive</h2>
-              <p className="mt-1 text-sm leading-6 text-slate">Receive support coming next</p>
-            </div>
+              <p className="mt-1 text-sm leading-6 text-slate">Receive USDC on Arc Testnet</p>
+            </button>
 
             <div className="min-h-[128px] rounded-[1.75rem] border border-aqua-mist bg-aqua-mist p-5 shadow-sm">
               <div className="flex items-start justify-between gap-3">
@@ -2756,15 +2814,17 @@ function AppWalletPage({ onNavigate, balances }: { onNavigate: AppNavigateHandle
         </div>
       </section>
 
+      {isReceiveOpen ? <div className="mt-6"><ReceiveFlow wallet={wallet} onClose={() => setIsReceiveOpen(false)} /></div> : null}
+
       <section className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
         <div className="rounded-[2rem] border border-lake-border bg-surface p-6 shadow-sm">
           <div className="flex items-center">
             <h2 className="text-xl font-semibold tracking-[-0.04em] text-arklake-ink">Assets</h2>
           </div>
 
-          {balances.length > 0 ? (
+          {userFacingBalances.length > 0 ? (
             <div className="mt-5 divide-y divide-lake-border">
-              {balances.map((asset) => (
+              {userFacingBalances.map((asset) => (
                 <div key={`${asset.blockchain}-${asset.tokenId}`} className="flex items-center justify-between gap-3 py-4 first:pt-0 last:pb-0 sm:gap-4">
                   <div className="flex min-w-0 items-center gap-3">
                     <TokenIcon symbol={asset.symbol} />
@@ -2931,6 +2991,7 @@ const arklakeSessionEndpoint = '/api/auth/session'
 const arklakeCircleWalletEndpoint = '/api/circle/wallet'
 const arklakeWalletBlockchain = 'ARC-TESTNET'
 const arklakeWalletAccountType = 'SCA'
+const arcTestnetCanonicalUsdcAddress = '0x3600000000000000000000000000000000000000'
 
 type CircleAuthStep = 'email' | 'otp' | 'verified'
 type CircleAuthStatus = 'idle' | 'initializing' | 'sending' | 'verifying' | 'checkingWallet' | 'initializingWallet'
@@ -2962,6 +3023,8 @@ type CircleTokenBalance = {
     symbol?: string
     blockchain: string
     tokenAddress?: string
+    standard?: string
+    isNative?: boolean
   }
 }
 
@@ -2972,6 +3035,8 @@ type ArklakeTokenBalance = {
   symbol: string
   blockchain: string
   tokenAddress?: string
+  standard?: string
+  isNative?: boolean
 }
 
 type CircleOtpTokens = {
@@ -3009,11 +3074,33 @@ function normalizeCircleTokenBalance(balance: CircleTokenBalance): ArklakeTokenB
     symbol: balance.token.symbol || balance.token.name || 'TOKEN',
     blockchain: balance.token.blockchain,
     tokenAddress: balance.token.tokenAddress,
+    standard: balance.token.standard,
+    isNative: balance.token.isNative,
   }
 }
 
+function isArcTestnetUsdc(balance: ArklakeTokenBalance) {
+  return balance.blockchain === arklakeWalletBlockchain && balance.symbol.toUpperCase() === 'USDC'
+}
+
+function isCanonicalArcTestnetUsdc(balance: ArklakeTokenBalance) {
+  return isArcTestnetUsdc(balance) && balance.tokenAddress?.toLowerCase() === arcTestnetCanonicalUsdcAddress
+}
+
+function isNativeArcTestnetUsdcMirror(balance: ArklakeTokenBalance) {
+  return isArcTestnetUsdc(balance) && !balance.tokenAddress
+}
+
 function getUsdcBalance(balances: ArklakeTokenBalance[]) {
-  return balances.find((balance) => balance.symbol.toUpperCase() === 'USDC')
+  return balances.find(isCanonicalArcTestnetUsdc) || balances.find(isNativeArcTestnetUsdcMirror) || balances.find((balance) => balance.symbol.toUpperCase() === 'USDC')
+}
+
+function getUserFacingBalances(balances: ArklakeTokenBalance[]) {
+  const hasCanonicalArcUsdc = balances.some(isCanonicalArcTestnetUsdc)
+
+  if (!hasCanonicalArcUsdc) return balances
+
+  return balances.filter((balance) => !isNativeArcTestnetUsdcMirror(balance))
 }
 
 function isValidEmail(value: string) {
@@ -3742,7 +3829,7 @@ export default function App() {
   }
 
   if (currentPath === '/app') {
-    return <AppHomePage onNavigate={handleAppNavigate} balances={arklakeBalances} />
+    return <AppHomePage onNavigate={handleAppNavigate} balances={arklakeBalances} wallet={arklakeWallet} />
   }
 
   if (currentPath === '/app/invoices') {
@@ -3759,7 +3846,7 @@ export default function App() {
   }
 
   if (currentPath === '/app/wallet') {
-    return <AppWalletPage onNavigate={handleAppNavigate} balances={arklakeBalances} />
+    return <AppWalletPage onNavigate={handleAppNavigate} balances={arklakeBalances} wallet={arklakeWallet} />
   }
 
   if (currentPath === '/app/swap') {

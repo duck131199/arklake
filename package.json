@@ -11,6 +11,7 @@
   "dependencies": {
     "@circle-fin/w3s-pw-web-sdk": "latest",
     "@supabase/supabase-js": "^2.115.0",
+    "qrcode.react": "^4.2.0",
     "react": "latest",
     "react-dom": "latest",
     "vite-plugin-node-polyfills": "latest"
