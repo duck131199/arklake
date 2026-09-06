@@ -1,7 +1,9 @@
 const CIRCLE_WALLETS_URL = 'https://api.circle.com/v1/w3s/wallets'
 const CIRCLE_USER_INITIALIZE_URL = 'https://api.circle.com/v1/w3s/user/initialize'
+const CIRCLE_TRANSFER_URL = 'https://api.circle.com/v1/w3s/user/transactions/transfer'
 const arklakeBlockchain = 'ARC-TESTNET'
 const arklakeAccountType = 'SCA'
+const arklakeCanonicalUsdcAddress = '0x3600000000000000000000000000000000000000'
 
 type VercelRequest = {
   method?: string
@@ -44,6 +46,50 @@ const getWalletId = (body: unknown) => {
   }
 
   return body.walletId
+}
+
+const getDestinationAddress = (body: unknown) => {
+  if (!isRecord(body) || typeof body.destinationAddress !== 'string' || !/^0x[a-fA-F0-9]{40}$/.test(body.destinationAddress)) {
+    throw new Error('Invalid destinationAddress')
+  }
+
+  return body.destinationAddress
+}
+
+const getTransferAmount = (body: unknown) => {
+  if (!isRecord(body) || typeof body.amount !== 'string' || !/^(?:0|[1-9]\d*)(?:\.\d{1,6})?$/.test(body.amount)) {
+    throw new Error('Invalid amount')
+  }
+
+  if (toUsdcUnits(body.amount) <= 0n) throw new Error('Invalid amount')
+
+  return body.amount
+}
+
+const toUsdcUnits = (amount: string) => {
+  const [whole, fraction = ''] = amount.split('.')
+  return BigInt(whole) * 1_000_000n + BigInt(fraction.padEnd(6, '0'))
+}
+
+const isArklakeWallet = (wallet: unknown, walletId: string) => {
+  return isRecord(wallet)
+    && wallet.id === walletId
+    && wallet.blockchain === arklakeBlockchain
+    && wallet.accountType === arklakeAccountType
+}
+
+const getCanonicalUsdcBalance = (tokenBalances: unknown[]) => {
+  return tokenBalances.find((balance) => {
+    if (!isRecord(balance) || !isRecord(balance.token)) return false
+
+    return typeof balance.amount === 'string'
+      && typeof balance.token.id === 'string'
+      && balance.token.blockchain === arklakeBlockchain
+      && typeof balance.token.symbol === 'string'
+      && balance.token.symbol.toUpperCase() === 'USDC'
+      && typeof balance.token.tokenAddress === 'string'
+      && balance.token.tokenAddress.toLowerCase() === arklakeCanonicalUsdcAddress
+  })
 }
 
 const listWallets = async (userToken: string) => {
@@ -90,6 +136,64 @@ const listBalances = async (userToken: string, walletId: string) => {
   }
 
   return { ok: true, status: 200, payload: { tokenBalances: circlePayload.data.tokenBalances } }
+}
+
+const createTransferTransaction = async (userToken: string, body: unknown) => {
+  const walletId = getWalletId(body)
+  const destinationAddress = getDestinationAddress(body)
+  const amount = getTransferAmount(body)
+
+  const walletsResult = await listWallets(userToken)
+  if (!walletsResult.ok || !isRecord(walletsResult.payload) || !Array.isArray(walletsResult.payload.wallets)) {
+    return { ok: false, status: walletsResult.status, payload: { error: 'Circle wallet lookup failed' } }
+  }
+
+  if (!walletsResult.payload.wallets.some((wallet) => isArklakeWallet(wallet, walletId))) {
+    return { ok: false, status: 403, payload: { error: 'Wallet is not an Arklake Arc Testnet wallet' } }
+  }
+
+  const balancesResult = await listBalances(userToken, walletId)
+  if (!balancesResult.ok || !isRecord(balancesResult.payload) || !Array.isArray(balancesResult.payload.tokenBalances)) {
+    return { ok: false, status: balancesResult.status, payload: { error: 'Circle balance lookup failed' } }
+  }
+
+  const canonicalUsdcBalance = getCanonicalUsdcBalance(balancesResult.payload.tokenBalances)
+  if (!isRecord(canonicalUsdcBalance) || typeof canonicalUsdcBalance.amount !== 'string' || !isRecord(canonicalUsdcBalance.token) || typeof canonicalUsdcBalance.token.id !== 'string') {
+    return { ok: false, status: 400, payload: { error: 'Canonical Arc Testnet USDC balance was not found' } }
+  }
+
+  if (toUsdcUnits(amount) > toUsdcUnits(canonicalUsdcBalance.amount)) {
+    return { ok: false, status: 400, payload: { error: 'Amount exceeds available USDC balance' } }
+  }
+
+  const circleResponse = await fetch(CIRCLE_TRANSFER_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${getCircleApiKey()}`,
+      'X-User-Token': userToken,
+    },
+    body: JSON.stringify({
+      idempotencyKey: crypto.randomUUID(),
+      destinationAddress,
+      walletId,
+      amounts: [amount],
+      tokenId: canonicalUsdcBalance.token.id,
+      feeLevel: 'MEDIUM',
+    }),
+  })
+
+  const circlePayload: unknown = await circleResponse.json()
+
+  if (!circleResponse.ok) {
+    return { ok: false, status: circleResponse.status, payload: isRecord(circlePayload) ? circlePayload : { error: 'Circle transfer request failed' } }
+  }
+
+  if (!isRecord(circlePayload) || !isRecord(circlePayload.data) || typeof circlePayload.data.challengeId !== 'string') {
+    return { ok: false, status: 502, payload: { error: 'Invalid Circle transfer response' } }
+  }
+
+  return { ok: true, status: 200, payload: { challengeId: circlePayload.data.challengeId } }
 }
 
 export default async function handler(request: VercelRequest, response: VercelResponse) {
@@ -142,9 +246,14 @@ export default async function handler(request: VercelRequest, response: VercelRe
       return jsonResponse(response, { challengeId: circlePayload.data.challengeId }, 200)
     }
 
+    if (request.body.action === 'createTransferTransaction') {
+      const result = await createTransferTransaction(userToken, request.body)
+      return jsonResponse(response, isRecord(result.payload) ? result.payload : { error: 'Circle transfer request failed' }, result.status)
+    }
+
     return jsonResponse(response, { error: 'Unknown action' }, 400)
   } catch (error) {
-    if (error instanceof Error && (error.message === 'Missing userToken' || error.message === 'Missing walletId')) {
+    if (error instanceof Error && (error.message === 'Missing userToken' || error.message === 'Missing walletId' || error.message === 'Invalid destinationAddress' || error.message === 'Invalid amount')) {
       return jsonResponse(response, { error: error.message }, 400)
     }
     if (error instanceof Error && error.message === 'Circle API key is not configured') {

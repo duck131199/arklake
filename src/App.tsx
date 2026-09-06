@@ -2759,10 +2759,461 @@ function TokenIcon({ symbol, icon }: { symbol: string; icon?: string }) {
   )
 }
 
-function AppWalletPage({ onNavigate, balances, wallet }: { onNavigate: AppNavigateHandler; balances: ArklakeTokenBalance[]; wallet: ArklakeWalletIdentity | null }) {
+function SendUsdcFlow({ wallet, balance, circleAuth, email, onClose, onBalancesRefresh, onCircleAuthRefresh }: { wallet: ArklakeWalletIdentity | null; balance?: ArklakeTokenBalance; circleAuth: CircleAuthContext | null; email: string; onClose: () => void; onBalancesRefresh: (balances: ArklakeTokenBalance[]) => void; onCircleAuthRefresh: (circleAuth: CircleSessionRefresh) => Promise<boolean> }) {
+  const [recipientAddress, setRecipientAddress] = useState('')
+  const [amount, setAmount] = useState('')
+  const [status, setStatus] = useState<SendStatus>('idle')
+  const [error, setError] = useState('')
+  const [resultMessage, setResultMessage] = useState('')
+  const [txHash, setTxHash] = useState('')
+  const [transactionId, setTransactionId] = useState('')
+  const [submittedTransfer, setSubmittedTransfer] = useState<{ amount: string; recipientAddress: string; expectedBalance: string } | null>(null)
+  const availableAmount = balance && isCanonicalArcTestnetUsdc(balance) ? balance.amount : '0'
+  const trimmedRecipient = recipientAddress.trim()
+  const trimmedAmount = amount.trim()
+  const recipientError = !trimmedRecipient ? 'Enter a recipient address.' : !isValidEvmAddress(trimmedRecipient) ? 'Enter a valid EVM address.' : wallet && trimmedRecipient.toLowerCase() === wallet.address.toLowerCase() ? 'Recipient cannot be your own Arklake wallet address.' : ''
+  const amountError = getSendAmountError(trimmedAmount, availableAmount)
+  const formValidationError = !wallet ? 'Connect an Arc Testnet wallet before sending.' : !balance || !isCanonicalArcTestnetUsdc(balance) ? 'Canonical Arc Testnet USDC balance was not found.' : recipientError || amountError
+  const signingReadinessError = !circleAuth ? 'Please sign in again before sending. Circle requires fresh user approval.' : !circleAppId ? 'Circle App ID is not configured.' : ''
+  const isBusy = status === 'preparing' || status === 'awaitingApproval' || status === 'syncing'
+
+  useEffect(() => {
+    const draft = loadPendingSendDraft()
+    if (!draft) return
+
+    setRecipientAddress(draft.recipient)
+    setAmount(draft.amount)
+    setStatus('review')
+    clearPendingSendDraft()
+  }, [])
+
+  const fetchFreshBalances = async () => {
+    if (!wallet || !circleAuth) return null
+
+    const response = await fetch(arklakeCircleWalletEndpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'listBalances', userToken: circleAuth.userToken, walletId: wallet.id }),
+    })
+
+    if (!response.ok) return null
+
+    const data = await response.json() as { tokenBalances?: CircleTokenBalance[] }
+    if (!Array.isArray(data.tokenBalances)) return null
+
+    return data.tokenBalances.map(normalizeCircleTokenBalance)
+  }
+
+  const pollBalancesUntilUpdated = async (expectedBalance: string) => {
+    const startedAt = Date.now()
+    const expectedUnits = toUsdcUnits(expectedBalance)
+
+    while (Date.now() - startedAt < 60000) {
+      const nextBalances = await fetchFreshBalances()
+      if (nextBalances) {
+        onBalancesRefresh(nextBalances)
+        const nextUsdcBalance = getUsdcBalance(nextBalances)
+        if (nextUsdcBalance && isCanonicalArcTestnetUsdc(nextUsdcBalance) && toUsdcUnits(nextUsdcBalance.amount) <= expectedUnits) {
+          return true
+        }
+      }
+
+      await new Promise((resolve) => window.setTimeout(resolve, 3000))
+    }
+
+    return false
+  }
+
+  const handleContinue = () => {
+    setError('')
+    setResultMessage('')
+    setTxHash('')
+    setTransactionId('')
+    setSubmittedTransfer(null)
+    if (formValidationError) {
+      setError(formValidationError)
+      return
+    }
+
+    setStatus('review')
+  }
+
+  const handleSigningRequired = () => {
+    savePendingSendDraft(trimmedRecipient, trimmedAmount)
+    setError('')
+    setStatus('signingNeeded')
+  }
+
+  const handleSend = async () => {
+    if (formValidationError || !wallet) {
+      setError(formValidationError || 'Unable to prepare send.')
+      return
+    }
+
+    if (!circleAuth) {
+      handleSigningRequired()
+      return
+    }
+
+    if (signingReadinessError) {
+      setError(signingReadinessError)
+      return
+    }
+
+    setError('')
+    setResultMessage('')
+    setTxHash('')
+    setTransactionId('')
+    setSubmittedTransfer(null)
+    setStatus('preparing')
+
+    try {
+      const response = await fetch(arklakeCircleWalletEndpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'createTransferTransaction',
+          userToken: circleAuth.userToken,
+          walletId: wallet.id,
+          destinationAddress: trimmedRecipient,
+          amount: trimmedAmount,
+        }),
+      })
+
+      const data = await response.json() as { challengeId?: string; error?: string }
+      if (!response.ok || !data.challengeId) throw new Error(data.error || `Circle transfer preparation failed (${response.status}).`)
+
+      setStatus('awaitingApproval')
+      const circleSdkModule = await import('@circle-fin/w3s-pw-web-sdk')
+      const W3SSdk = circleSdkModule.W3SSdk
+      const sdk = new W3SSdk({ appSettings: { appId: circleAppId as string } })
+      sdk.setAuthentication({ userToken: circleAuth.userToken, encryptionKey: circleAuth.encryptionKey })
+
+      await new Promise<void>((resolve, reject) => {
+        sdk.execute(data.challengeId as string, (challengeError, challengeResult) => {
+          if (challengeError) {
+            reject(new Error(challengeError.message || 'Circle send approval failed.'))
+            return
+          }
+
+          if (challengeResult?.status !== 'COMPLETE') {
+            reject(new Error('Circle send approval did not complete.'))
+            return
+          }
+
+          const resultData = (challengeResult as { data?: { txHash?: string; transactionId?: string; id?: string } }).data
+          if (resultData?.txHash) setTxHash(resultData.txHash)
+          if (resultData?.transactionId || resultData?.id) setTransactionId(resultData.transactionId || resultData.id || '')
+          resolve()
+        })
+      })
+
+      const expectedBalance = fromUsdcUnits(toUsdcUnits(availableAmount) - toUsdcUnits(trimmedAmount))
+      setSubmittedTransfer({ amount: trimmedAmount, recipientAddress: trimmedRecipient, expectedBalance })
+      clearPendingSendDraft()
+      setStatus('syncing')
+      setResultMessage('Circle approval completed. Waiting for wallet balance to update.')
+
+      const didUpdate = await pollBalancesUntilUpdated(expectedBalance)
+      setStatus('submitted')
+      setResultMessage(didUpdate ? 'Balance updated.' : 'Transfer was submitted, but the wallet balance has not refreshed yet.')
+    } catch (sendError) {
+      setStatus('failed')
+      setError(sendError instanceof Error ? sendError.message : 'Unable to send USDC.')
+    }
+  }
+
+  const resetSendAttempt = () => {
+    setRecipientAddress('')
+    setAmount('')
+    setStatus('idle')
+    setError('')
+    setResultMessage('')
+    setTxHash('')
+    setTransactionId('')
+    setSubmittedTransfer(null)
+    clearPendingSendDraft()
+  }
+
+  const handleSendAnother = () => {
+    resetSendAttempt()
+  }
+
+  const handleClose = () => {
+    resetSendAttempt()
+    onClose()
+  }
+
+  return (
+    <section className="rounded-[2rem] border border-lake-border bg-surface p-6 shadow-sm">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-sm font-semibold text-slate">Send USDC</p>
+          <h2 className="mt-2 text-2xl font-semibold tracking-[-0.05em] text-arklake-ink">Arc Testnet transfer</h2>
+          <p className="mt-2 text-sm leading-6 text-slate">Only send to an address that supports Arc Testnet. Sending to an unsupported network may result in loss of funds.</p>
+        </div>
+        <button type="button" className="rounded-full border border-lake-border bg-surface px-4 py-2 text-sm font-semibold text-arklake-ink" onClick={handleClose} disabled={isBusy}>Close</button>
+      </div>
+
+      <div className="mt-5 rounded-[1.5rem] border border-aqua-mist bg-aqua-mist/60 px-4 py-3 text-sm font-semibold text-arklake-ink">
+        Network: Arc Testnet · Available: {availableAmount} USDC
+      </div>
+
+      {submittedTransfer && (status === 'syncing' || status === 'submitted') ? (
+        <div className="mt-5 space-y-4">
+          <h3 className="text-lg font-semibold tracking-[-0.04em] text-arklake-ink">Transfer submitted</h3>
+          <ReviewInvoiceRow label="Amount">{submittedTransfer.amount} USDC</ReviewInvoiceRow>
+          <ReviewInvoiceRow label="Recipient"><span className="break-all">{submittedTransfer.recipientAddress}</span></ReviewInvoiceRow>
+          <ReviewInvoiceRow label="Network">Arc Testnet</ReviewInvoiceRow>
+          <div className="rounded-[1.5rem] border border-aqua-mist bg-aqua-mist/60 px-4 py-3 text-sm font-semibold text-arklake-ink">Circle approval completed. Waiting for wallet balance to update.</div>
+          <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+            <button type="button" className="rounded-full border border-lake-border bg-surface px-5 py-2.5 text-sm font-semibold text-arklake-ink" onClick={handleClose} disabled={status === 'syncing'}>Done</button>
+            <button type="button" className="rounded-full bg-arklake-ink px-5 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50" onClick={handleSendAnother} disabled={status === 'syncing'}>Send another</button>
+          </div>
+        </div>
+      ) : status === 'review' || status === 'signingNeeded' ? (
+        <div className="mt-5 space-y-4">
+          <ReviewInvoiceRow label="Amount">{trimmedAmount} USDC</ReviewInvoiceRow>
+          <ReviewInvoiceRow label="Recipient"><span className="break-all">{trimmedRecipient}</span></ReviewInvoiceRow>
+          <ReviewInvoiceRow label="Network">Arc Testnet</ReviewInvoiceRow>
+          <div className="rounded-[1.5rem] border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">Only send to an address that supports Arc Testnet. Sending to an unsupported network may result in loss of funds.</div>
+          {status === 'signingNeeded' ? (
+            <div className="rounded-[1.5rem] border border-aqua-mist bg-aqua-mist/60 px-4 py-3">
+              <p className="text-sm font-semibold text-arklake-ink">Circle approval needed</p>
+              <p className="mt-1 text-sm leading-6 text-slate">For security, confirm your wallet before sending.</p>
+              <CircleSigningReauthPanel email={email} onComplete={async (nextCircleAuth) => {
+                const synced = await onCircleAuthRefresh(nextCircleAuth)
+                if (!synced) {
+                  setError('Wallet confirmed, but Arklake session could not be refreshed. Please try again.')
+                  return false
+                }
+
+                setError('')
+                setStatus('review')
+                return true
+              }} />
+            </div>
+          ) : null}
+          <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+            <button type="button" className="rounded-full border border-lake-border bg-surface px-5 py-2.5 text-sm font-semibold text-arklake-ink" onClick={() => setStatus('idle')}>Back</button>
+            {status === 'signingNeeded' ? (
+              null
+            ) : (
+              <button type="button" className="rounded-full bg-arklake-ink px-5 py-2.5 text-sm font-semibold text-white" onClick={handleSend}>Send USDC</button>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="mt-5 grid gap-4">
+          <label className="block">
+            <span className="text-sm font-semibold text-arklake-ink">Recipient address</span>
+            <input className="mt-2 w-full rounded-[1.25rem] border border-lake-border bg-surface px-4 py-3 text-base font-medium text-arklake-ink outline-none transition placeholder:text-slate focus:border-arklake-aqua focus:ring-4 focus:ring-arklake-aqua/15" value={recipientAddress} onChange={(event) => setRecipientAddress(event.target.value)} placeholder="0x..." disabled={isBusy} />
+          </label>
+          <label className="block">
+            <span className="text-sm font-semibold text-arklake-ink">Amount</span>
+            <input className="mt-2 w-full rounded-[1.25rem] border border-lake-border bg-surface px-4 py-3 text-base font-medium text-arklake-ink outline-none transition placeholder:text-slate focus:border-arklake-aqua focus:ring-4 focus:ring-arklake-aqua/15" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0.00" inputMode="decimal" disabled={isBusy} />
+          </label>
+          <button type="button" className="rounded-full bg-arklake-ink px-5 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50" onClick={handleContinue} disabled={isBusy}>Continue</button>
+        </div>
+      )}
+
+      {isBusy ? <p className="mt-4 rounded-[1.5rem] border border-aqua-mist bg-aqua-mist/60 px-4 py-3 text-sm font-semibold text-arklake-ink">{status === 'preparing' ? 'Preparing Circle transfer…' : status === 'awaitingApproval' ? 'Awaiting user approval in Circle…' : 'Transfer submitted. Waiting for Circle balance to update…'}</p> : null}
+      {resultMessage ? <p className="mt-4 rounded-[1.5rem] border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">{resultMessage}</p> : null}
+      {txHash ? <p className="mt-3 break-all text-sm text-slate">Tx hash: <a className="font-semibold text-arklake-aqua" href={`https://testnet.arcscan.app/tx/${txHash}`} target="_blank" rel="noreferrer">{txHash}</a></p> : null}
+      {transactionId ? <p className="mt-3 break-all text-sm text-slate">Circle transaction ID: {transactionId}</p> : null}
+      {error ? <p className="mt-4 rounded-[1.5rem] border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{error}</p> : null}
+    </section>
+  )
+}
+
+function CircleSigningReauthPanel({ email, onComplete }: { email: string; onComplete: (circleAuth: CircleSessionRefresh) => Promise<boolean> }) {
+  const sdkRef = useRef<CircleSdkInstance | null>(null)
+  const [status, setStatus] = useState<CircleAuthStatus>('idle')
+  const [deviceId, setDeviceId] = useState('')
+  const [otpTokens, setOtpTokens] = useState<CircleOtpTokens | null>(null)
+  const [error, setError] = useState('')
+  const [resendCooldown, setResendCooldown] = useState(0)
+  const statusRef = useRef(status)
+  const trimmedEmail = email.trim().toLowerCase()
+  const isBusy = status === 'sending' || status === 'verifying'
+  const canSendOtp = Boolean(isValidEmail(trimmedEmail) && deviceId && !isBusy)
+  const canRetryOtp = Boolean(otpTokens && !isBusy)
+  const canResendOtp = Boolean(isValidEmail(trimmedEmail) && !isBusy && resendCooldown === 0)
+
+  useEffect(() => {
+    statusRef.current = status
+  }, [status])
+
+  const onLoginComplete = async (loginError: unknown, result: unknown) => {
+    if (loginError) {
+      setStatus('idle')
+      setError(loginError instanceof Error ? loginError.message : 'Circle OTP verification failed.')
+      return
+    }
+
+    const safeResult = result as CircleLoginResult | undefined
+    if (!safeResult?.userToken || !safeResult?.encryptionKey || !safeResult?.refreshToken) {
+      setStatus('idle')
+      setError('Circle OTP verification did not return session refresh approval.')
+      return
+    }
+
+    const synced = await onComplete({ userToken: safeResult.userToken, encryptionKey: safeResult.encryptionKey, refreshToken: safeResult.refreshToken, deviceId })
+    if (!synced) {
+      setStatus('idle')
+      return
+    }
+
+    clearPendingSendDraft()
+    setStatus('idle')
+    setError('')
+  }
+
+  useEffect(() => {
+    if (!circleAppId) return
+
+    let isMounted = true
+
+    const initCircleSdk = async () => {
+      setStatus('initializing')
+      setError('')
+
+      try {
+        const circleSdkModule = await import('@circle-fin/w3s-pw-web-sdk')
+        const W3SSdk = circleSdkModule.W3SSdk
+        document.getElementById('sdkIframe')?.remove()
+        ;(W3SSdk as unknown as { instance: unknown }).instance = null
+        const sdk = new W3SSdk({ appSettings: { appId: circleAppId } }, onLoginComplete)
+        sdk.updateConfigs({ appSettings: { appId: circleAppId } }, onLoginComplete)
+
+        const nextDeviceId = await sdk.getDeviceId()
+        if (!isMounted) return
+
+        sdkRef.current = sdk
+        setDeviceId(nextDeviceId)
+        setStatus('idle')
+      } catch (sdkError) {
+        if (!isMounted) return
+
+        setStatus('idle')
+        setError(sdkError instanceof Error ? sdkError.message : 'Unable to initialize Circle Web SDK.')
+      }
+    }
+
+    const handleCircleMessage = (event: MessageEvent) => {
+      if (event.origin !== 'https://pw-auth.circle.com') return
+
+      const data = event.data as Record<string, unknown> | null
+      if (data?.onClose && statusRef.current === 'verifying') {
+        setStatus('idle')
+      }
+    }
+
+    window.addEventListener('message', handleCircleMessage)
+    void initCircleSdk()
+
+    return () => {
+      isMounted = false
+      window.removeEventListener('message', handleCircleMessage)
+      document.getElementById('sdkIframe')?.remove()
+    }
+  }, [])
+
+  useEffect(() => {
+    if (resendCooldown <= 0) return
+
+    const intervalId = window.setInterval(() => {
+      setResendCooldown((seconds) => Math.max(0, seconds - 1))
+    }, 1000)
+
+    return () => window.clearInterval(intervalId)
+  }, [resendCooldown])
+
+  const openOtpModal = (tokens: CircleOtpTokens) => {
+    if (!circleAppId || !sdkRef.current) return
+
+    sdkRef.current.updateConfigs({
+      appSettings: { appId: circleAppId },
+      loginConfigs: tokens,
+    }, onLoginComplete)
+    setStatus('verifying')
+    sdkRef.current.verifyOtp()
+  }
+
+  const requestOtp = async () => {
+    if (!circleAppId || !circleOtpRequestEndpoint) {
+      setError('Wallet confirmation is not ready yet.')
+      return
+    }
+    if (!isValidEmail(trimmedEmail)) {
+      setError('Arklake session email is missing or invalid.')
+      return
+    }
+    if (!deviceId) {
+      setError('Circle device session is not ready yet.')
+      return
+    }
+
+    setStatus('sending')
+    setError('')
+
+    try {
+      const response = await fetch(circleOtpRequestEndpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deviceId, email: trimmedEmail }),
+      })
+
+      if (!response.ok) throw new Error(`OTP request failed (${response.status}).`)
+
+      const data = await response.json() as Partial<CircleOtpTokens>
+      if (!data.deviceToken || !data.deviceEncryptionKey || !data.otpToken) {
+        throw new Error('OTP response is missing Circle login tokens.')
+      }
+
+      const nextTokens = {
+        deviceToken: data.deviceToken,
+        deviceEncryptionKey: data.deviceEncryptionKey,
+        otpToken: data.otpToken,
+      }
+
+      setOtpTokens(nextTokens)
+      setResendCooldown(60)
+      openOtpModal(nextTokens)
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to send Circle Email OTP.')
+      setStatus('idle')
+    }
+  }
+
+  return (
+    <div className="mt-4 rounded-[1.25rem] border border-lake-border bg-surface px-4 py-3">
+      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate">Confirming</p>
+      <p className="mt-1 break-all text-sm font-semibold text-arklake-ink">{trimmedEmail || 'Arklake email unavailable'}</p>
+      <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+        <button type="button" className="rounded-full bg-arklake-ink px-5 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50" disabled={!canSendOtp} onClick={requestOtp}>
+          {status === 'sending' ? 'Sending code…' : !deviceId ? 'Preparing Circle…' : 'Send code'}
+        </button>
+        {otpTokens ? (
+          <button type="button" className="rounded-full border border-lake-border bg-surface px-5 py-2.5 text-sm font-semibold text-arklake-ink disabled:cursor-not-allowed disabled:opacity-50" disabled={!canRetryOtp} onClick={() => openOtpModal(otpTokens)}>
+            {status === 'verifying' ? 'Circle is open…' : 'Open OTP modal'}
+          </button>
+        ) : null}
+        {otpTokens ? (
+          <button type="button" className="rounded-full border border-lake-border bg-surface px-5 py-2.5 text-sm font-semibold text-arklake-ink disabled:cursor-not-allowed disabled:opacity-50" disabled={!canResendOtp} onClick={requestOtp}>
+            {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : 'Resend code'}
+          </button>
+        ) : null}
+      </div>
+      {error ? <p className="mt-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{error}</p> : null}
+    </div>
+  )
+}
+
+function AppWalletPage({ onNavigate, balances, wallet, circleAuth, email, onBalancesRefresh, onCircleAuthRefresh }: { onNavigate: AppNavigateHandler; balances: ArklakeTokenBalance[]; wallet: ArklakeWalletIdentity | null; circleAuth: CircleAuthContext | null; email: string; onBalancesRefresh: (balances: ArklakeTokenBalance[]) => void; onCircleAuthRefresh: (circleAuth: CircleSessionRefresh) => Promise<boolean> }) {
   const usdcBalance = getUsdcBalance(balances)
   const userFacingBalances = getUserFacingBalances(balances)
-  const [isReceiveOpen, setIsReceiveOpen] = useState(false)
+  const [walletAction, setWalletAction] = useState<'receive' | 'send' | null>(null)
 
   return (
     <AppShell activeItem="Wallet" title="Wallet" subtitle="Your money in Arklake." onNavigate={onNavigate}>
@@ -2785,7 +3236,7 @@ function AppWalletPage({ onNavigate, balances, wallet }: { onNavigate: AppNaviga
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-2">
-            <button type="button" className="min-h-[128px] rounded-[1.75rem] border border-lake-border bg-surface p-5 text-left shadow-sm" onClick={() => setIsReceiveOpen(true)}>
+            <button type="button" className="min-h-[128px] rounded-[1.75rem] border border-lake-border bg-surface p-5 text-left shadow-sm" onClick={() => setWalletAction('receive')}>
               <div className="flex items-start justify-between gap-3">
                 <div className="flex h-10 w-10 items-center justify-center rounded-full bg-aqua-mist text-arklake-aqua">
                   <svg className="h-5 w-5" viewBox="0 0 20 20" fill="none" aria-hidden="true">
@@ -2798,23 +3249,24 @@ function AppWalletPage({ onNavigate, balances, wallet }: { onNavigate: AppNaviga
               <p className="mt-1 text-sm leading-6 text-slate">Receive USDC on Arc Testnet</p>
             </button>
 
-            <div className="min-h-[128px] rounded-[1.75rem] border border-aqua-mist bg-aqua-mist p-5 shadow-sm">
+            <button type="button" className="min-h-[128px] rounded-[1.75rem] border border-aqua-mist bg-aqua-mist p-5 text-left shadow-sm" onClick={() => setWalletAction('send')}>
               <div className="flex items-start justify-between gap-3">
                 <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white text-arklake-aqua">
                   <svg className="h-5 w-5" viewBox="0 0 20 20" fill="none" aria-hidden="true">
                     <path d="M10 15.5v-10M6.25 9.25 10 5.5l3.75 3.75" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
                 </div>
-                <span className="rounded-full border border-white/70 bg-white/70 px-2.5 py-1 text-xs font-semibold text-slate">Coming later</span>
+                <span className="rounded-full border border-white/70 bg-white/70 px-2.5 py-1 text-xs font-semibold text-slate">Arc Testnet</span>
               </div>
               <h2 className="mt-4 text-lg font-semibold tracking-[-0.04em] text-arklake-ink">Send</h2>
-              <p className="mt-1 text-sm leading-6 text-slate">Send support coming later</p>
-            </div>
+              <p className="mt-1 text-sm leading-6 text-slate">Send USDC on Arc Testnet</p>
+            </button>
           </div>
         </div>
       </section>
 
-      {isReceiveOpen ? <div className="mt-6"><ReceiveFlow wallet={wallet} onClose={() => setIsReceiveOpen(false)} /></div> : null}
+      {walletAction === 'receive' ? <div className="mt-6"><ReceiveFlow wallet={wallet} onClose={() => setWalletAction(null)} /></div> : null}
+      {walletAction === 'send' ? <div className="mt-6"><SendUsdcFlow wallet={wallet} balance={usdcBalance} circleAuth={circleAuth} email={email} onClose={() => setWalletAction(null)} onBalancesRefresh={onBalancesRefresh} onCircleAuthRefresh={onCircleAuthRefresh} /></div> : null}
 
       <section className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
         <div className="rounded-[2rem] border border-lake-border bg-surface p-6 shadow-sm">
@@ -2992,6 +3444,8 @@ const arklakeCircleWalletEndpoint = '/api/circle/wallet'
 const arklakeWalletBlockchain = 'ARC-TESTNET'
 const arklakeWalletAccountType = 'SCA'
 const arcTestnetCanonicalUsdcAddress = '0x3600000000000000000000000000000000000000'
+const pendingSendDraftStorageKey = 'arklake_pending_send_draft_v1'
+const pendingSendDraftTtlMs = 10 * 60 * 1000
 
 type CircleAuthStep = 'email' | 'otp' | 'verified'
 type CircleAuthStatus = 'idle' | 'initializing' | 'sending' | 'verifying' | 'checkingWallet' | 'initializingWallet'
@@ -3004,6 +3458,17 @@ type CircleLoginResult = {
   encryptionKey?: string
   refreshToken?: string
   userID?: string
+}
+
+type CircleAuthContext = Required<Pick<CircleLoginResult, 'userToken' | 'encryptionKey'>>
+type CircleSessionRefresh = CircleAuthContext & Required<Pick<CircleLoginResult, 'refreshToken'>> & { deviceId: string }
+
+type SendStatus = 'idle' | 'review' | 'signingNeeded' | 'preparing' | 'awaitingApproval' | 'syncing' | 'submitted' | 'failed'
+type PendingSendDraft = {
+  action: 'send'
+  recipient: string
+  amount: string
+  expiresAt: number
 }
 
 type CircleWallet = {
@@ -3101,6 +3566,64 @@ function getUserFacingBalances(balances: ArklakeTokenBalance[]) {
   if (!hasCanonicalArcUsdc) return balances
 
   return balances.filter((balance) => !isNativeArcTestnetUsdcMirror(balance))
+}
+
+function isValidEvmAddress(value: string) {
+  return /^0x[a-fA-F0-9]{40}$/.test(value)
+}
+
+function toUsdcUnits(amount: string) {
+  const [whole, fraction = ''] = amount.split('.')
+  return BigInt(whole) * 1_000_000n + BigInt(fraction.padEnd(6, '0'))
+}
+
+function fromUsdcUnits(units: bigint) {
+  const whole = units / 1_000_000n
+  const fraction = (units % 1_000_000n).toString().padStart(6, '0').replace(/0+$/, '')
+  return fraction ? `${whole}.${fraction}` : whole.toString()
+}
+
+function getSendAmountError(amount: string, availableAmount: string) {
+  const trimmedAmount = amount.trim()
+  if (!trimmedAmount) return 'Enter an amount.'
+  if (!/^(?:0|[1-9]\d*)(?:\.\d{1,6})?$/.test(trimmedAmount)) return 'Enter a valid USDC amount with up to 6 decimals.'
+  if (toUsdcUnits(trimmedAmount) <= 0n) return 'Amount must be greater than 0.'
+  if (toUsdcUnits(trimmedAmount) > toUsdcUnits(availableAmount || '0')) return 'Amount exceeds available USDC balance.'
+
+  return ''
+}
+
+function savePendingSendDraft(recipient: string, amount: string) {
+  const draft: PendingSendDraft = {
+    action: 'send',
+    recipient,
+    amount,
+    expiresAt: Date.now() + pendingSendDraftTtlMs,
+  }
+
+  window.sessionStorage.setItem(pendingSendDraftStorageKey, JSON.stringify(draft))
+}
+
+function loadPendingSendDraft(): PendingSendDraft | null {
+  try {
+    const storedDraft = window.sessionStorage.getItem(pendingSendDraftStorageKey)
+    if (!storedDraft) return null
+
+    const draft = JSON.parse(storedDraft) as Partial<PendingSendDraft>
+    if (draft.action !== 'send' || typeof draft.recipient !== 'string' || typeof draft.amount !== 'string' || typeof draft.expiresAt !== 'number' || draft.expiresAt <= Date.now()) {
+      window.sessionStorage.removeItem(pendingSendDraftStorageKey)
+      return null
+    }
+
+    return draft as PendingSendDraft
+  } catch {
+    window.sessionStorage.removeItem(pendingSendDraftStorageKey)
+    return null
+  }
+}
+
+function clearPendingSendDraft() {
+  window.sessionStorage.removeItem(pendingSendDraftStorageKey)
 }
 
 function isValidEmail(value: string) {
@@ -3320,7 +3843,7 @@ function CircleEmailOtpDebugPage() {
   )
 }
 
-function AuthPage({ onSignedIn }: { onSignedIn: (wallet: ArklakeWalletIdentity, balances: ArklakeTokenBalance[], email: string) => void }) {
+function AuthPage({ onSignedIn }: { onSignedIn: (wallet: ArklakeWalletIdentity, balances: ArklakeTokenBalance[], email: string, circleAuth: CircleAuthContext) => void }) {
   const sdkRef = useRef<CircleSdkInstance | null>(null)
   const [step, setStep] = useState<CircleAuthStep>('email')
   const [status, setStatus] = useState<CircleAuthStatus>('idle')
@@ -3513,7 +4036,7 @@ function AuthPage({ onSignedIn }: { onSignedIn: (wallet: ArklakeWalletIdentity, 
         return createArklakeSession(safeResult, wallet).then(() => ({ wallet, balances }))
       }).then(({ wallet, balances }) => {
         setStatus('idle')
-        onSignedIn(wallet, balances, trimmedEmail)
+        onSignedIn(wallet, balances, trimmedEmail, { userToken: safeResult.userToken as string, encryptionKey: safeResult.encryptionKey as string })
       }).catch((sessionError) => {
         setStatus('idle')
         setError(sessionError instanceof Error ? sessionError.message : 'Unable to prepare Circle wallet.')
@@ -3722,6 +4245,7 @@ export default function App() {
   const [sessionStatus, setSessionStatus] = useState<'checking' | 'authenticated' | 'anonymous'>('checking')
   const [arklakeWallet, setArklakeWallet] = useState<ArklakeWalletIdentity | null>(null)
   const [arklakeBalances, setArklakeBalances] = useState<ArklakeTokenBalance[]>([])
+  const [circleAuth, setCircleAuth] = useState<CircleAuthContext | null>(null)
   const [arklakeEmail, setArklakeEmail] = useState('')
   const [, setRuntimeInvoiceStatusTick] = useState(0)
 
@@ -3733,6 +4257,7 @@ export default function App() {
         setArklakeEmail(data.email)
         setArklakeWallet(data.wallet)
         setArklakeBalances(data.balances)
+        setCircleAuth(null)
         setSessionStatus('authenticated')
         return true
       }
@@ -3740,6 +4265,7 @@ export default function App() {
       setArklakeEmail('')
       setArklakeWallet(null)
       setArklakeBalances([])
+      setCircleAuth(null)
       setSessionStatus('anonymous')
       return false
     } catch {
@@ -3797,18 +4323,43 @@ export default function App() {
     setCurrentPath(path)
   }
 
-  const handleSignedIn = (wallet: ArklakeWalletIdentity, balances: ArklakeTokenBalance[], email: string) => {
+  const handleSignedIn = (wallet: ArklakeWalletIdentity, balances: ArklakeTokenBalance[], email: string, nextCircleAuth: CircleAuthContext) => {
+    const shouldRestoreSendDraft = Boolean(loadPendingSendDraft())
     setArklakeWallet(wallet)
     setArklakeBalances(balances)
+    setCircleAuth(nextCircleAuth)
     setArklakeEmail(email)
     setSessionStatus('authenticated')
-    handleAppNavigate('/app')
+    handleAppNavigate(shouldRestoreSendDraft ? '/app/wallet' : '/app')
+  }
+
+  const handleCircleAuthRefresh = async (nextCircleAuth: CircleSessionRefresh) => {
+    try {
+      const response = await fetch(arklakeSessionEndpoint, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userToken: nextCircleAuth.userToken,
+          refreshToken: nextCircleAuth.refreshToken,
+          deviceId: nextCircleAuth.deviceId,
+        }),
+      })
+
+      if (!response.ok) return false
+
+      setCircleAuth({ userToken: nextCircleAuth.userToken, encryptionKey: nextCircleAuth.encryptionKey })
+      return true
+    } catch {
+      return false
+    }
   }
 
   const handleSignOut = () => {
     void fetch(arklakeSessionEndpoint, { method: 'DELETE', credentials: 'include' }).finally(() => {
       setArklakeWallet(null)
       setArklakeBalances([])
+      setCircleAuth(null)
       setArklakeEmail('')
       setSessionStatus('anonymous')
       handleAppNavigate('/')
@@ -3846,7 +4397,7 @@ export default function App() {
   }
 
   if (currentPath === '/app/wallet') {
-    return <AppWalletPage onNavigate={handleAppNavigate} balances={arklakeBalances} wallet={arklakeWallet} />
+    return <AppWalletPage onNavigate={handleAppNavigate} balances={arklakeBalances} wallet={arklakeWallet} circleAuth={circleAuth} email={arklakeEmail} onBalancesRefresh={setArklakeBalances} onCircleAuthRefresh={handleCircleAuthRefresh} />
   }
 
   if (currentPath === '/app/swap') {

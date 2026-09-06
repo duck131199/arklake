@@ -40,6 +40,7 @@ type ArklakeTokenBalance = {
 type StoredSession = {
   sid: string
   account_id: string
+  circle_user_id?: string
   circle_user_token: string
   circle_refresh_token: string
   circle_device_id: string
@@ -47,7 +48,14 @@ type StoredSession = {
   revoked_at: string | null
   arklake_accounts: {
     email: string
+    circle_user_id?: string
   } | null
+}
+
+type SessionTokenRefreshPayload = {
+  userToken?: unknown
+  refreshToken?: unknown
+  deviceId?: unknown
 }
 
 type StoredWallet = {
@@ -271,6 +279,47 @@ async function getBootstrapSession(sid: string) {
   }
 }
 
+async function updateCurrentSessionCircleTokens(sid: string, payload: SessionTokenRefreshPayload) {
+  const { userToken, refreshToken, deviceId } = payload
+  if (typeof userToken !== 'string' || typeof refreshToken !== 'string' || typeof deviceId !== 'string') {
+    return { status: 400, body: { error: 'Invalid Circle session data.' } }
+  }
+
+  const supabase = getSupabaseClient()
+  const { data: session, error: sessionError } = await supabase
+    .from('arklake_sessions')
+    .select('sid, account_id, expires_at, revoked_at, arklake_accounts(circle_user_id)')
+    .eq('sid', sid)
+    .maybeSingle<StoredSession>()
+
+  if (sessionError || !session || session.revoked_at || new Date(session.expires_at).getTime() <= Date.now()) {
+    return { status: 401, body: { error: 'Arklake session is not active.' } }
+  }
+
+  const circleUserId = await verifyCircleUserToken(userToken)
+  if (!circleUserId) return { status: 401, body: { error: 'Circle authentication could not be verified.' } }
+  if (session.arklake_accounts?.circle_user_id && session.arklake_accounts.circle_user_id !== circleUserId) {
+    logSafeSessionDiagnostic('circle_user_mismatch_on_session_refresh')
+    return { status: 403, body: { error: 'Circle user does not match the current Arklake session.' } }
+  }
+
+  const { error: updateError } = await supabase
+    .from('arklake_sessions')
+    .update({
+      circle_user_token: userToken,
+      circle_refresh_token: refreshToken,
+      circle_device_id: deviceId,
+    })
+    .eq('sid', sid)
+
+  if (updateError) {
+    logSafeSessionDiagnostic('supabase_update_session_tokens_failed', { error: getSafeSupabaseError(updateError) })
+    return { status: 502, body: { error: 'Unable to update Arklake session.' } }
+  }
+
+  return { status: 200, body: { authenticated: true } }
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'GET') {
     try {
@@ -290,6 +339,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(500).json({ error: 'Circle API key is not configured.' })
       }
       return res.status(502).json({ error: 'Unable to bootstrap Arklake session.' })
+    }
+  }
+
+  if (req.method === 'PATCH') {
+    try {
+      const session = verifySessionCookie(parseCookies(req.headers.cookie)[cookieName])
+      if (!session) return res.status(401).json({ error: 'Arklake session is not active.' })
+
+      const result = await updateCurrentSessionCircleTokens(session.sid, req.body || {})
+      return res.status(result.status).json(result.body)
+    } catch (error) {
+      if (error instanceof Error && error.message === 'ARKLAKE_SESSION_SECRET is not configured') {
+        return res.status(500).json({ error: 'Session secret is not configured.' })
+      }
+      if (error instanceof Error && error.message === 'CIRCLE_API_KEY is not configured') {
+        return res.status(500).json({ error: 'Circle API key is not configured.' })
+      }
+      if (error instanceof Error && error.message === 'Supabase is not configured') {
+        return res.status(500).json({ error: 'Supabase is not configured.' })
+      }
+      return res.status(502).json({ error: 'Unable to update Arklake session.' })
     }
   }
 
@@ -416,6 +486,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({ authenticated: false })
   }
 
-  res.setHeader('Allow', 'GET, POST, DELETE')
+  res.setHeader('Allow', 'GET, PATCH, POST, DELETE')
   return res.status(405).json({ error: 'Method not allowed' })
 }
