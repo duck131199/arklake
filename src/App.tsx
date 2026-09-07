@@ -2014,9 +2014,9 @@ function ReceiveFlow({ wallet, onClose }: { wallet: ArklakeWalletIdentity | null
   )
 }
 
-function AppHomePage({ onNavigate, balances, wallet }: { onNavigate: AppNavigateHandler; balances: ArklakeTokenBalance[]; wallet: ArklakeWalletIdentity | null }) {
+function AppHomePage({ onNavigate, balances, wallet, circleAuth, email, onBalancesRefresh, onCircleAuthRefresh }: { onNavigate: AppNavigateHandler; balances: ArklakeTokenBalance[]; wallet: ArklakeWalletIdentity | null; circleAuth: CircleAuthContext | null; email: string; onBalancesRefresh: (balances: ArklakeTokenBalance[]) => void; onCircleAuthRefresh: (circleAuth: CircleSessionRefresh) => Promise<boolean> }) {
   const usdcBalance = getUsdcBalance(balances)
-  const [isReceiveOpen, setIsReceiveOpen] = useState(false)
+  const [homeAction, setHomeAction] = useState<'receive' | 'send' | null>(() => loadPendingSendDraft()?.origin === 'home' ? 'send' : null)
 
   return (
     <AppShell activeItem="Home" title="Home" subtitle="Your account overview." onNavigate={onNavigate}>
@@ -2037,7 +2037,7 @@ function AppHomePage({ onNavigate, balances, wallet }: { onNavigate: AppNavigate
               </div>
 
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
-                <button type="button" className="min-h-[148px] rounded-[1.75rem] border border-lake-border bg-surface p-5 text-left shadow-sm" onClick={() => setIsReceiveOpen(true)}>
+                <button type="button" className="min-h-[148px] rounded-[1.75rem] border border-lake-border bg-surface p-5 text-left shadow-sm" onClick={() => setHomeAction('receive')}>
                   <div className="flex h-11 w-11 items-center justify-center rounded-full bg-aqua-mist text-arklake-aqua">
                     <svg className="h-5 w-5" viewBox="0 0 20 20" fill="none" aria-hidden="true">
                       <path d="M10 4.5v10M6.25 10.75 10 14.5l3.75-3.75" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
@@ -2047,19 +2047,20 @@ function AppHomePage({ onNavigate, balances, wallet }: { onNavigate: AppNavigate
                   <p className="mt-1 text-sm leading-6 text-slate">Receive USDC on Arc Testnet</p>
                 </button>
 
-                <div className="min-h-[148px] rounded-[1.75rem] border border-aqua-mist bg-aqua-mist p-5 shadow-sm">
+                <button type="button" className="min-h-[148px] rounded-[1.75rem] border border-aqua-mist bg-aqua-mist p-5 text-left shadow-sm" onClick={() => setHomeAction('send')}>
                   <div className="flex h-11 w-11 items-center justify-center rounded-full bg-white text-arklake-aqua">
                     <svg className="h-5 w-5" viewBox="0 0 20 20" fill="none" aria-hidden="true">
                       <path d="M10 15.5v-10M6.25 9.25 10 5.5l3.75 3.75" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
                     </svg>
                   </div>
                   <h2 className="mt-4 text-xl font-semibold tracking-[-0.04em] text-arklake-ink">Send</h2>
-                  <p className="mt-1 text-sm leading-6 text-slate">Send support coming later</p>
-                </div>
+                  <p className="mt-1 text-sm leading-6 text-slate">Send USDC on Arc Testnet</p>
+                </button>
               </div>
             </section>
 
-            {isReceiveOpen ? <div className="mt-6"><ReceiveFlow wallet={wallet} onClose={() => setIsReceiveOpen(false)} /></div> : null}
+            {homeAction === 'receive' ? <div className="mt-6"><ReceiveFlow wallet={wallet} onClose={() => setHomeAction(null)} /></div> : null}
+            {homeAction === 'send' ? <div className="mt-6"><SendUsdcFlow origin="home" wallet={wallet} balance={usdcBalance} circleAuth={circleAuth} email={email} onClose={() => setHomeAction(null)} onBalancesRefresh={onBalancesRefresh} onCircleAuthRefresh={onCircleAuthRefresh} /></div> : null}
 
             <section className="mt-6 rounded-[2rem] border border-lake-border bg-surface p-6 shadow-sm">
               <div className="flex items-center justify-between">
@@ -2759,7 +2760,7 @@ function TokenIcon({ symbol, icon }: { symbol: string; icon?: string }) {
   )
 }
 
-function SendUsdcFlow({ wallet, balance, circleAuth, email, onClose, onBalancesRefresh, onCircleAuthRefresh }: { wallet: ArklakeWalletIdentity | null; balance?: ArklakeTokenBalance; circleAuth: CircleAuthContext | null; email: string; onClose: () => void; onBalancesRefresh: (balances: ArklakeTokenBalance[]) => void; onCircleAuthRefresh: (circleAuth: CircleSessionRefresh) => Promise<boolean> }) {
+function SendUsdcFlow({ origin, wallet, balance, circleAuth, email, onClose, onBalancesRefresh, onCircleAuthRefresh }: { origin: PendingSendDraft['origin']; wallet: ArklakeWalletIdentity | null; balance?: ArklakeTokenBalance; circleAuth: CircleAuthContext | null; email: string; onClose: () => void; onBalancesRefresh: (balances: ArklakeTokenBalance[]) => void; onCircleAuthRefresh: (circleAuth: CircleSessionRefresh) => Promise<boolean> }) {
   const [recipientAddress, setRecipientAddress] = useState('')
   const [amount, setAmount] = useState('')
   const [status, setStatus] = useState<SendStatus>('idle')
@@ -2779,13 +2780,13 @@ function SendUsdcFlow({ wallet, balance, circleAuth, email, onClose, onBalancesR
 
   useEffect(() => {
     const draft = loadPendingSendDraft()
-    if (!draft) return
+    if (!draft || draft.origin !== origin) return
 
     setRecipientAddress(draft.recipient)
     setAmount(draft.amount)
     setStatus('review')
     clearPendingSendDraft()
-  }, [])
+  }, [origin])
 
   const fetchFreshBalances = async () => {
     if (!wallet || !circleAuth) return null
@@ -2839,7 +2840,7 @@ function SendUsdcFlow({ wallet, balance, circleAuth, email, onClose, onBalancesR
   }
 
   const handleSigningRequired = () => {
-    savePendingSendDraft(trimmedRecipient, trimmedAmount)
+    savePendingSendDraft(trimmedRecipient, trimmedAmount, origin)
     setError('')
     setStatus('signingNeeded')
   }
@@ -3213,7 +3214,7 @@ function CircleSigningReauthPanel({ email, onComplete }: { email: string; onComp
 function AppWalletPage({ onNavigate, balances, wallet, circleAuth, email, onBalancesRefresh, onCircleAuthRefresh }: { onNavigate: AppNavigateHandler; balances: ArklakeTokenBalance[]; wallet: ArklakeWalletIdentity | null; circleAuth: CircleAuthContext | null; email: string; onBalancesRefresh: (balances: ArklakeTokenBalance[]) => void; onCircleAuthRefresh: (circleAuth: CircleSessionRefresh) => Promise<boolean> }) {
   const usdcBalance = getUsdcBalance(balances)
   const userFacingBalances = getUserFacingBalances(balances)
-  const [walletAction, setWalletAction] = useState<'receive' | 'send' | null>(null)
+  const [walletAction, setWalletAction] = useState<'receive' | 'send' | null>(() => loadPendingSendDraft()?.origin === 'wallet' ? 'send' : null)
 
   return (
     <AppShell activeItem="Wallet" title="Wallet" subtitle="Your money in Arklake." onNavigate={onNavigate}>
@@ -3266,7 +3267,7 @@ function AppWalletPage({ onNavigate, balances, wallet, circleAuth, email, onBala
       </section>
 
       {walletAction === 'receive' ? <div className="mt-6"><ReceiveFlow wallet={wallet} onClose={() => setWalletAction(null)} /></div> : null}
-      {walletAction === 'send' ? <div className="mt-6"><SendUsdcFlow wallet={wallet} balance={usdcBalance} circleAuth={circleAuth} email={email} onClose={() => setWalletAction(null)} onBalancesRefresh={onBalancesRefresh} onCircleAuthRefresh={onCircleAuthRefresh} /></div> : null}
+      {walletAction === 'send' ? <div className="mt-6"><SendUsdcFlow origin="wallet" wallet={wallet} balance={usdcBalance} circleAuth={circleAuth} email={email} onClose={() => setWalletAction(null)} onBalancesRefresh={onBalancesRefresh} onCircleAuthRefresh={onCircleAuthRefresh} /></div> : null}
 
       <section className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
         <div className="rounded-[2rem] border border-lake-border bg-surface p-6 shadow-sm">
@@ -3466,6 +3467,7 @@ type CircleSessionRefresh = CircleAuthContext & Required<Pick<CircleLoginResult,
 type SendStatus = 'idle' | 'review' | 'signingNeeded' | 'preparing' | 'awaitingApproval' | 'syncing' | 'submitted' | 'failed'
 type PendingSendDraft = {
   action: 'send'
+  origin: 'home' | 'wallet'
   recipient: string
   amount: string
   expiresAt: number
@@ -3593,9 +3595,10 @@ function getSendAmountError(amount: string, availableAmount: string) {
   return ''
 }
 
-function savePendingSendDraft(recipient: string, amount: string) {
+function savePendingSendDraft(recipient: string, amount: string, origin: PendingSendDraft['origin']) {
   const draft: PendingSendDraft = {
     action: 'send',
+    origin,
     recipient,
     amount,
     expiresAt: Date.now() + pendingSendDraftTtlMs,
@@ -3615,7 +3618,7 @@ function loadPendingSendDraft(): PendingSendDraft | null {
       return null
     }
 
-    return draft as PendingSendDraft
+    return { ...draft, origin: draft.origin === 'home' ? 'home' : 'wallet' } as PendingSendDraft
   } catch {
     window.sessionStorage.removeItem(pendingSendDraftStorageKey)
     return null
@@ -4324,13 +4327,13 @@ export default function App() {
   }
 
   const handleSignedIn = (wallet: ArklakeWalletIdentity, balances: ArklakeTokenBalance[], email: string, nextCircleAuth: CircleAuthContext) => {
-    const shouldRestoreSendDraft = Boolean(loadPendingSendDraft())
+    const pendingSendDraft = loadPendingSendDraft()
     setArklakeWallet(wallet)
     setArklakeBalances(balances)
     setCircleAuth(nextCircleAuth)
     setArklakeEmail(email)
     setSessionStatus('authenticated')
-    handleAppNavigate(shouldRestoreSendDraft ? '/app/wallet' : '/app')
+    handleAppNavigate(pendingSendDraft?.origin === 'wallet' ? '/app/wallet' : '/app')
   }
 
   const handleCircleAuthRefresh = async (nextCircleAuth: CircleSessionRefresh) => {
@@ -4380,7 +4383,7 @@ export default function App() {
   }
 
   if (currentPath === '/app') {
-    return <AppHomePage onNavigate={handleAppNavigate} balances={arklakeBalances} wallet={arklakeWallet} />
+    return <AppHomePage onNavigate={handleAppNavigate} balances={arklakeBalances} wallet={arklakeWallet} circleAuth={circleAuth} email={arklakeEmail} onBalancesRefresh={setArklakeBalances} onCircleAuthRefresh={handleCircleAuthRefresh} />
   }
 
   if (currentPath === '/app/invoices') {
