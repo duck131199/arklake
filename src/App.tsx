@@ -3216,6 +3216,32 @@ function AppWalletPage({ onNavigate, balances, wallet, circleAuth, email, onBala
   const usdcBalance = getUsdcBalance(balances)
   const userFacingBalances = getUserFacingBalances(balances)
   const [walletAction, setWalletAction] = useState<'receive' | 'send' | null>(() => loadPendingSendDraft()?.origin === 'wallet' ? 'send' : null)
+  const [activities, setActivities] = useState<WalletActivity[]>([])
+  const [activityStatus, setActivityStatus] = useState<'loading' | 'ready' | 'error'>('loading')
+  const [selectedActivity, setSelectedActivity] = useState<WalletActivity | null>(null)
+  const [activityRefresh, setActivityRefresh] = useState(0)
+
+  useEffect(() => {
+    if (!wallet?.id) {
+      setActivities([])
+      setActivityStatus('ready')
+      return
+    }
+    let cancelled = false
+    setActivityStatus('loading')
+    fetch('/api/circle/activity-sync', { method: 'POST' })
+      .then(async (response) => {
+        const data = await response.json().catch(() => null) as { activities?: WalletActivity[]; error?: string } | null
+        if (!response.ok || !Array.isArray(data?.activities)) throw new Error(data?.error || 'Activity could not be loaded.')
+        if (!cancelled) {
+          setActivities(data.activities)
+          setSelectedActivity((current) => current ? data.activities!.find((activity) => activity.id === current.id) || null : null)
+          setActivityStatus('ready')
+        }
+      })
+      .catch(() => { if (!cancelled) setActivityStatus('error') })
+    return () => { cancelled = true }
+  }, [wallet?.id, activityRefresh])
 
   return (
     <AppShell activeItem="Wallet" title="Wallet" subtitle="Your money in Arklake." onNavigate={onNavigate}>
@@ -3303,17 +3329,122 @@ function AppWalletPage({ onNavigate, balances, wallet, circleAuth, email, onBala
         </div>
 
         <div className="rounded-[2rem] border border-lake-border bg-surface p-6 shadow-sm">
-          <div className="flex items-center">
-            <h2 className="text-xl font-semibold tracking-[-0.04em] text-arklake-ink">Recent activity</h2>
-          </div>
-
-          <div className="mt-5 rounded-[1.5rem] border border-dashed border-lake-border bg-lake-canvas px-5 py-8 text-center">
-            <p className="font-semibold text-arklake-ink">Coming later</p>
-            <p className="mt-2 text-sm leading-6 text-slate">Recent wallet activity will appear here once transaction history is connected.</p>
-          </div>
+          {selectedActivity ? (
+            <TransactionDetail activity={selectedActivity} onClose={() => setSelectedActivity(null)} />
+          ) : (
+            <>
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-xl font-semibold tracking-[-0.04em] text-arklake-ink">Recent activity</h2>
+                {activityStatus === 'ready' ? <button type="button" className="text-sm font-semibold text-arklake-aqua" onClick={() => setActivityRefresh((value) => value + 1)}>Refresh</button> : null}
+              </div>
+              {activityStatus === 'loading' ? (
+                <div className="mt-5 rounded-[1.5rem] bg-lake-canvas px-5 py-8 text-center text-sm font-semibold text-slate" role="status">Loading wallet activity…</div>
+              ) : activityStatus === 'error' ? (
+                <div className="mt-5 rounded-[1.5rem] border border-red-200 bg-red-50 px-5 py-7 text-center">
+                  <p className="font-semibold text-red-700">Wallet activity could not be loaded.</p>
+                  <p className="mt-2 text-sm leading-6 text-red-700">Your balances and transactions were not changed.</p>
+                  <button type="button" className="mt-4 rounded-full border border-red-200 bg-white px-4 py-2 text-sm font-semibold text-red-700" onClick={() => setActivityRefresh((value) => value + 1)}>Try again</button>
+                </div>
+              ) : activities.length === 0 ? (
+                <div className="mt-5 rounded-[1.5rem] border border-dashed border-lake-border bg-lake-canvas px-5 py-8 text-center">
+                  <p className="font-semibold text-arklake-ink">No wallet activity yet</p>
+                  <p className="mt-2 text-sm leading-6 text-slate">Confirmed and pending money movements will appear here.</p>
+                </div>
+              ) : (
+                <div className="mt-5 divide-y divide-lake-border">
+                  {activities.map((activity) => <ActivityRow key={activity.id} activity={activity} onSelect={() => setSelectedActivity(activity)} />)}
+                </div>
+              )}
+            </>
+          )}
         </div>
       </section>
     </AppShell>
+  )
+}
+
+type WalletActivityLeg = {
+  direction: 'in' | 'out'
+  amount: string
+  tokenId: string | null
+  tokenAddress: string | null
+  symbol: string | null
+  sourceAddress: string | null
+  destinationAddress: string | null
+}
+
+type WalletActivity = {
+  id: string
+  type: 'receive' | 'send' | 'swap'
+  status: 'processing' | 'confirmed' | 'failed' | 'attention'
+  blockchain: string
+  txHash: string | null
+  sourceAddress: string | null
+  destinationAddress: string | null
+  occurredAt: string
+  confirmedAt: string | null
+  networkFee: string | null
+  legs: WalletActivityLeg[]
+}
+
+const activityLabel = (value: string) => value.charAt(0).toUpperCase() + value.slice(1)
+const activityTime = (value: string) => new Date(value).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })
+const activityAsset = (leg: WalletActivityLeg) => leg.symbol || 'Token'
+
+function ActivityAmount({ activity }: { activity: WalletActivity }) {
+  const incoming = activity.legs.find((leg) => leg.direction === 'in')
+  const outgoing = activity.legs.find((leg) => leg.direction === 'out')
+  if (activity.type === 'swap' && incoming && outgoing) return <span>{outgoing.amount} {activityAsset(outgoing)} → {incoming.amount} {activityAsset(incoming)}</span>
+  const leg = incoming || outgoing
+  if (!leg) return <span>Amount unavailable</span>
+  return <span>{leg.direction === 'in' ? '+' : '−'}{leg.amount} {activityAsset(leg)}</span>
+}
+
+function ActivityStatus({ status }: { status: WalletActivity['status'] }) {
+  const classes = status === 'confirmed' ? 'border-aqua-mist bg-aqua-mist text-arklake-ink'
+    : status === 'failed' ? 'border-red-200 bg-red-50 text-red-700'
+      : status === 'attention' ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-lake-border bg-lake-canvas text-slate'
+  return <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${classes}`}>{activityLabel(status)}</span>
+}
+
+function ActivityRow({ activity, onSelect }: { activity: WalletActivity; onSelect: () => void }) {
+  return (
+    <button type="button" className="flex w-full items-center justify-between gap-4 py-4 text-left first:pt-0 last:pb-0" onClick={onSelect}>
+      <div className="min-w-0">
+        <div className="flex items-center gap-2"><p className="font-semibold text-arklake-ink">{activityLabel(activity.type)}</p><ActivityStatus status={activity.status} /></div>
+        <p className="mt-1 text-sm text-slate">{activityTime(activity.occurredAt)}</p>
+      </div>
+      <p className={`shrink-0 text-right font-semibold ${activity.type === 'receive' ? 'text-arklake-aqua' : 'text-arklake-ink'}`}><ActivityAmount activity={activity} /></p>
+    </button>
+  )
+}
+
+function DetailField({ label, value }: { label: string; value: string }) {
+  return <div className="py-3 first:pt-0 last:pb-0"><p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate">{label}</p><p className="mt-1 break-all font-medium text-arklake-ink">{value}</p></div>
+}
+
+function TransactionDetail({ activity, onClose }: { activity: WalletActivity; onClose: () => void }) {
+  return (
+    <div>
+      <div className="flex items-start justify-between gap-4">
+        <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-arklake-aqua">Transaction detail</p><h2 className="mt-2 text-2xl font-semibold tracking-[-0.05em] text-arklake-ink">{activityLabel(activity.type)}</h2></div>
+        <button type="button" className="rounded-full border border-lake-border px-4 py-2 text-sm font-semibold text-arklake-ink" onClick={onClose}>Back</button>
+      </div>
+      <div className="mt-5 rounded-[1.5rem] bg-lake-canvas p-5">
+        <p className="text-xl font-semibold text-arklake-ink"><ActivityAmount activity={activity} /></p>
+        <div className="mt-3"><ActivityStatus status={activity.status} /></div>
+      </div>
+      <div className="mt-5 divide-y divide-lake-border">
+        {activity.legs.map((leg, index) => <DetailField key={`${leg.direction}-${leg.tokenAddress || leg.tokenId}-${index}`} label={activity.type === 'swap' ? (leg.direction === 'out' ? 'Pay' : 'Receive') : 'Amount'} value={`${leg.direction === 'in' && activity.type !== 'swap' ? '+' : leg.direction === 'out' && activity.type !== 'swap' ? '−' : ''}${leg.amount} ${activityAsset(leg)}`} />)}
+        <DetailField label="Time" value={activityTime(activity.confirmedAt || activity.occurredAt)} />
+        <DetailField label="From" value={activity.legs.find((leg) => leg.direction === 'out')?.sourceAddress || activity.sourceAddress || 'Unavailable'} />
+        <DetailField label="To" value={activity.legs.find((leg) => leg.direction === 'in')?.destinationAddress || activity.destinationAddress || 'Unavailable'} />
+        <DetailField label="Network" value={activity.blockchain === 'ARC-TESTNET' ? 'Arc Testnet' : activity.blockchain} />
+        {activity.networkFee ? <DetailField label="Actual fee" value={activity.networkFee} /> : null}
+        {activity.txHash ? <DetailField label="Transaction hash" value={activity.txHash} /> : null}
+      </div>
+      {activity.txHash ? <a className="mt-5 inline-flex rounded-full bg-arklake-ink px-5 py-2.5 text-sm font-semibold text-white" href={`https://testnet.arcscan.app/tx/${activity.txHash}`} target="_blank" rel="noreferrer">Open on Arcscan</a> : null}
+    </div>
   )
 }
 
