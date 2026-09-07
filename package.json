@@ -30,5 +30,8 @@
     "tailwindcss": "^3.4.17",
     "typescript": "latest",
     "vite": "latest"
+  },
+  "overrides": {
+    "rpc-websockets": "9.3.8"
   }
 }
