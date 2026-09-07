@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
+import SwapFlow from './SwapFlow'
 import type { W3SSdk as CircleW3SSdk } from '@circle-fin/w3s-pw-web-sdk'
 
 const shellWidth = 'site-shell'
@@ -3027,7 +3028,7 @@ function SendUsdcFlow({ origin, wallet, balance, circleAuth, email, onClose, onB
   )
 }
 
-function CircleSigningReauthPanel({ email, onComplete }: { email: string; onComplete: (circleAuth: CircleSessionRefresh) => Promise<boolean> }) {
+function CircleSigningReauthPanel({ email, onComplete, title = 'Confirming' }: { email: string; onComplete: (circleAuth: CircleSessionRefresh) => Promise<boolean>; title?: string }) {
   const sdkRef = useRef<CircleSdkInstance | null>(null)
   const [status, setStatus] = useState<CircleAuthStatus>('idle')
   const [deviceId, setDeviceId] = useState('')
@@ -3189,7 +3190,7 @@ function CircleSigningReauthPanel({ email, onComplete }: { email: string; onComp
 
   return (
     <div className="mt-4 rounded-[1.25rem] border border-lake-border bg-surface px-4 py-3">
-      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate">Confirming</p>
+      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate">{title}</p>
       <p className="mt-1 break-all text-sm font-semibold text-arklake-ink">{trimmedEmail || 'Arklake email unavailable'}</p>
       <div className="mt-4 flex flex-col gap-3 sm:flex-row">
         <button type="button" className="rounded-full bg-arklake-ink px-5 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50" disabled={!canSendOtp} onClick={requestOtp}>
@@ -3316,37 +3317,22 @@ function AppWalletPage({ onNavigate, balances, wallet, circleAuth, email, onBala
   )
 }
 
-function AppSwapPage({ onNavigate }: { onNavigate: AppNavigateHandler }) {
+function AppSwapPage({ onNavigate, balances, wallet, circleAuth, email, onBalancesRefresh, onCircleAuthRefresh }: { onNavigate: AppNavigateHandler; balances: ArklakeTokenBalance[]; wallet: ArklakeWalletIdentity | null; circleAuth: CircleAuthContext | null; email: string; onBalancesRefresh: (balances: ArklakeTokenBalance[]) => void; onCircleAuthRefresh: (circleAuth: CircleSessionRefresh) => Promise<boolean> }) {
+  const refreshBalances = async () => {
+    if (!wallet || !circleAuth) throw new Error('Signing access is required.')
+    const response = await fetch(arklakeCircleWalletEndpoint, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'listBalances', userToken: circleAuth.userToken, walletId: wallet.id }),
+    })
+    const data = await response.json() as { tokenBalances?: CircleTokenBalance[] }
+    if (!response.ok || !Array.isArray(data.tokenBalances)) throw new Error('Balance refresh failed.')
+    const next = data.tokenBalances.map(normalizeCircleTokenBalance)
+    onBalancesRefresh(next)
+    return getUserFacingBalances(next)
+  }
   return (
     <AppShell activeItem="Swap" title="Swap" subtitle="Convert your assets." onNavigate={onNavigate}>
-      <section className="grid gap-6 lg:grid-cols-[minmax(0,0.92fr)_minmax(340px,0.48fr)]">
-        <div className="rounded-[2rem] border border-lake-border bg-surface p-5 shadow-sm sm:p-6">
-          <div className="mb-5 flex items-center justify-between gap-3">
-            <h2 className="text-xl font-semibold tracking-[-0.04em] text-arklake-ink">Swap assets</h2>
-          </div>
-
-          <div className="flex min-h-[360px] flex-col items-center justify-center rounded-[1.5rem] border border-dashed border-lake-border bg-lake-canvas px-5 py-8 text-center">
-            <h3 className="text-2xl font-semibold tracking-[-0.05em] text-arklake-ink">No assets available to swap</h3>
-            <p className="mt-2 max-w-sm text-sm leading-6 text-slate">Supported asset swaps will appear here when available.</p>
-          </div>
-        </div>
-
-        <aside className="rounded-[2rem] border border-lake-border bg-surface p-6 shadow-sm">
-          <div className="flex flex-col justify-between overflow-hidden rounded-[1.5rem] bg-gradient-to-br from-white to-aqua-mist/60 p-6 lg:min-h-[220px]">
-            <div>
-              <p className="text-sm font-semibold text-arklake-aqua">Invoice payments</p>
-              <h2 className="mt-4 text-3xl font-semibold leading-[1.05] tracking-[-0.055em] text-arklake-ink">Need USDC to pay an invoice?</h2>
-              <p className="mt-4 text-sm leading-6 text-slate">Swap support will appear here as real assets and routes become available.</p>
-            </div>
-            <a href="/app/invoices" className="mt-8 inline-flex w-fit items-center justify-center rounded-full border border-lake-border bg-surface px-5 py-2.5 text-sm font-semibold text-arklake-ink shadow-sm" onClick={(event) => {
-              event.preventDefault()
-              onNavigate('/app/invoices')
-            }}>
-              View invoices
-            </a>
-          </div>
-        </aside>
-      </section>
+      <SwapFlow key={wallet?.id} wallet={wallet} balances={getUserFacingBalances(balances)} circleAuth={circleAuth} appId={circleAppId || ''} refreshBalances={refreshBalances} signingPanel={<CircleSigningReauthPanel email={email} onComplete={onCircleAuthRefresh} title="Wallet approval needed" />} />
     </AppShell>
   )
 }
@@ -4404,7 +4390,7 @@ export default function App() {
   }
 
   if (currentPath === '/app/swap') {
-    return <AppSwapPage onNavigate={handleAppNavigate} />
+    return <AppSwapPage onNavigate={handleAppNavigate} balances={arklakeBalances} wallet={arklakeWallet} circleAuth={circleAuth} email={arklakeEmail} onBalancesRefresh={setArklakeBalances} onCircleAuthRefresh={handleCircleAuthRefresh} />
   }
 
   if (currentPath === '/app/account') {

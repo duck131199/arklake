@@ -9,11 +9,15 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@circle-fin/adapter-circle-wallets": "1.7.2",
+    "@circle-fin/adapter-viem-v2": "1.17.1",
+    "@circle-fin/swap-kit": "1.6.1",
     "@circle-fin/w3s-pw-web-sdk": "latest",
     "@supabase/supabase-js": "^2.115.0",
     "qrcode.react": "^4.2.0",
     "react": "latest",
     "react-dom": "latest",
+    "viem": "2.56.3",
     "vite-plugin-node-polyfills": "latest"
   },
   "devDependencies": {
