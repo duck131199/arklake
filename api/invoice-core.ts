@@ -25,3 +25,10 @@ export function validateInvoiceCreate(value: unknown) {
 export function invoiceExpiresAt(expiry: InvoiceExpiryOption, now = new Date()) {
   return new Date(now.getTime() + expiryMilliseconds[expiry]).toISOString()
 }
+
+export function maskInvoiceEmail(value: string) {
+  const [local, domain] = value.trim().toLowerCase().split('@')
+  if (!local || !domain) return 'Private recipient'
+  const visible = local.length === 1 ? `${local}*` : `${local[0]}${local.length > 2 ? '…' : '*'}${local.length > 2 ? local.at(-1) : ''}`
+  return `${visible}@${domain}`
+}

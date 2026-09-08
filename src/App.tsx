@@ -2626,6 +2626,7 @@ function AppCreateInvoicePage({ onCreateInvoice, onNavigate }: { onCreateInvoice
 function AppInvoiceDetailPage({ invoice, wasJustCreated = false, onNavigate }: { invoice: RuntimeInvoice; wasJustCreated?: boolean; onNavigate: (path: string) => void }) {
   const status = getRuntimeInvoiceStatus(invoice)
   const [hasCopiedInvoiceId, setHasCopiedInvoiceId] = useState(false)
+  const [hasCopiedPublicLink, setHasCopiedPublicLink] = useState(false)
 
   useEffect(() => {
     if (!hasCopiedInvoiceId) return
@@ -2638,6 +2639,12 @@ function AppInvoiceDetailPage({ invoice, wasJustCreated = false, onNavigate }: {
   const handleCopyInvoiceId = async () => {
     await navigator.clipboard.writeText(invoice.id)
     setHasCopiedInvoiceId(true)
+  }
+
+  const handleCopyPublicLink = async () => {
+    await navigator.clipboard.writeText(`${window.location.origin}/invoice/${invoice.id}`)
+    setHasCopiedPublicLink(true)
+    window.setTimeout(() => setHasCopiedPublicLink(false), 1800)
   }
 
   return (
@@ -2658,6 +2665,13 @@ function AppInvoiceDetailPage({ invoice, wasJustCreated = false, onNavigate }: {
               onClick={handleCopyInvoiceId}
             >
               {hasCopiedInvoiceId ? 'Copied' : 'Copy invoice ID'}
+            </button>
+            <button
+              type="button"
+              className="inline-flex items-center justify-center rounded-full bg-arklake-ink px-3 py-1 text-xs font-semibold text-white shadow-sm"
+              onClick={() => void handleCopyPublicLink()}
+            >
+              {hasCopiedPublicLink ? 'Link copied' : 'Copy public link'}
             </button>
           </div>
         </div>
@@ -2715,6 +2729,137 @@ function AppInvoiceNotFoundPage({ onNavigate }: { onNavigate: (path: string) => 
         </button>
       </section>
     </AppShell>
+  )
+}
+
+type PublicInvoiceRecord = {
+  id: string
+  invoiceNumber: string
+  seller: string
+  payer: string
+  amount: string
+  asset: string
+  memo: string
+  status: 'active' | 'paid' | 'expired'
+  createdAt: string
+  expiresAt: string
+}
+
+type PublicPaymentOption = 'arklake' | 'wallet' | 'scan'
+
+function PublicInvoicePage({ invoiceId }: { invoiceId: string }) {
+  const [invoice, setInvoice] = useState<PublicInvoiceRecord | null>(null)
+  const [status, setStatus] = useState<'loading' | 'ready' | 'not-found' | 'error'>('loading')
+  const [error, setError] = useState('')
+  const [paymentOption, setPaymentOption] = useState<PublicPaymentOption | null>(null)
+
+  const loadInvoice = async () => {
+    setStatus('loading')
+    setError('')
+    try {
+      const response = await fetch(`/api/public-invoice?id=${encodeURIComponent(invoiceId)}`)
+      const payload = await response.json().catch(() => null) as { invoice?: PublicInvoiceRecord; error?: string } | null
+      if (response.status === 404) {
+        setInvoice(null)
+        setStatus('not-found')
+        return
+      }
+      if (!response.ok || !payload?.invoice) throw new Error(payload?.error || 'Invoice could not be loaded.')
+      setInvoice(payload.invoice)
+      setStatus('ready')
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : 'Invoice could not be loaded.')
+      setStatus('error')
+    }
+  }
+
+  useEffect(() => { void loadInvoice() }, [invoiceId])
+
+  const optionCopy: Record<PublicPaymentOption, { title: string; description: string }> = {
+    arklake: { title: 'Pay with Arklake', description: 'Arklake payment will be available in the next payment step.' },
+    wallet: { title: 'Connect wallet', description: 'External wallet connection is not enabled yet.' },
+    scan: { title: 'Scan to pay', description: 'The payment QR will be added with verified payments.' },
+  }
+
+  return (
+    <main className="min-h-screen bg-lake-canvas text-arklake-ink">
+      <header className="border-b border-lake-border bg-surface/90 backdrop-blur-xl">
+        <div className={`${shellWidth} flex items-center justify-between py-5`}>
+          <a href="/" aria-label="Arklake home"><ProductMark /></a>
+          <span className="rounded-full border border-lake-border bg-lake-canvas px-3 py-1.5 text-xs font-semibold text-slate">Secure invoice</span>
+        </div>
+      </header>
+
+      <div className={`${shellWidth} py-10 sm:py-14`}>
+        {status === 'loading' ? <div className="grid min-h-[420px] place-items-center text-sm font-semibold text-slate">Loading invoice…</div> : null}
+        {status === 'error' ? (
+          <section className="mx-auto max-w-xl rounded-[2rem] border border-lake-border bg-surface p-8 text-center shadow-sm">
+            <h1 className="text-2xl font-semibold tracking-[-0.04em]">Invoice unavailable</h1>
+            <p className="mt-3 text-sm leading-6 text-slate">{error}</p>
+            <button type="button" className="mt-5 rounded-full bg-arklake-ink px-5 py-2.5 text-sm font-semibold text-white" onClick={() => void loadInvoice()}>Try again</button>
+          </section>
+        ) : null}
+        {status === 'not-found' ? (
+          <section className="mx-auto max-w-xl rounded-[2rem] border border-lake-border bg-surface p-8 text-center shadow-sm">
+            <h1 className="text-2xl font-semibold tracking-[-0.04em]">Invoice not found</h1>
+            <p className="mt-3 text-sm leading-6 text-slate">Check the link with the person who sent it.</p>
+          </section>
+        ) : null}
+        {status === 'ready' && invoice ? (
+          <section className="mx-auto max-w-2xl overflow-hidden rounded-[2rem] border border-lake-border bg-surface shadow-[0_24px_70px_rgba(20,33,39,0.08)]">
+            <div className="border-b border-lake-border bg-aqua-mist/45 p-6 sm:p-8">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className="text-sm font-semibold text-slate">{invoice.invoiceNumber}</p>
+                <InvoiceStatusBadge status={invoice.status === 'active' ? 'Active' : invoice.status === 'paid' ? 'Paid' : 'Expired'} />
+              </div>
+              <p className="mt-7 text-sm font-semibold text-slate">Amount due</p>
+              <h1 className="mt-2 text-4xl font-semibold tracking-[-0.06em] sm:text-5xl">{invoice.amount} {invoice.asset}</h1>
+              <p className="mt-4 text-sm leading-6 text-slate">Requested by {invoice.seller} for {invoice.payer}</p>
+            </div>
+
+            <div className="p-6 sm:p-8">
+              <div className="grid gap-4 rounded-[1.5rem] border border-lake-border bg-lake-canvas p-5 sm:grid-cols-2">
+                <div><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate">Memo</p><p className="mt-2 text-sm font-semibold">{invoice.memo || '—'}</p></div>
+                <div><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate">Created</p><p className="mt-2 text-sm font-semibold">{formatInvoiceDateTime(new Date(invoice.createdAt))}</p></div>
+                <div><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate">{invoice.status === 'expired' ? 'Expired' : 'Expires'}</p><p className="mt-2 text-sm font-semibold">{formatInvoiceDateTime(new Date(invoice.expiresAt))}</p></div>
+              </div>
+
+              {invoice.status === 'expired' ? (
+                <div className="mt-6 rounded-[1.5rem] border border-red-200 bg-red-50 p-5">
+                  <h2 className="font-semibold text-red-800">This invoice has expired</h2>
+                  <p className="mt-2 text-sm leading-6 text-red-700">It can no longer be paid. Ask the seller to create a new invoice.</p>
+                </div>
+              ) : invoice.status === 'paid' ? (
+                <div className="mt-6 rounded-[1.5rem] border border-emerald-200 bg-emerald-50 p-5 text-sm font-semibold text-emerald-800">This invoice has been paid.</div>
+              ) : (
+                <div className="mt-7">
+                  <h2 className="text-xl font-semibold tracking-[-0.04em]">Choose how to pay</h2>
+                  <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                    {([
+                      ['arklake', 'Pay with Arklake', 'Use your Arklake balance'],
+                      ['wallet', 'Connect wallet', 'Use an external wallet'],
+                      ['scan', 'Scan to pay', 'Pay from another device'],
+                    ] as const).map(([value, title, description]) => (
+                      <button key={value} type="button" className={`rounded-[1.35rem] border p-4 text-left transition ${paymentOption === value ? 'border-arklake-aqua bg-aqua-mist/60 ring-4 ring-arklake-aqua/10' : 'border-lake-border bg-surface hover:bg-lake-canvas'}`} onClick={() => setPaymentOption(value)}>
+                        <span className="block text-sm font-semibold">{title}</span>
+                        <span className="mt-2 block text-xs leading-5 text-slate">{description}</span>
+                      </button>
+                    ))}
+                  </div>
+                  {paymentOption ? (
+                    <div className="mt-4 rounded-[1.35rem] border border-aqua-mist bg-aqua-mist/40 p-4">
+                      <p className="text-sm font-semibold">{optionCopy[paymentOption].title}</p>
+                      <p className="mt-1 text-sm leading-6 text-slate">{optionCopy[paymentOption].description}</p>
+                      <p className="mt-2 text-xs font-medium text-slate">Target: {invoice.invoiceNumber} · {invoice.amount} {invoice.asset}</p>
+                    </div>
+                  ) : null}
+                </div>
+              )}
+            </div>
+          </section>
+        ) : null}
+      </div>
+    </main>
   )
 }
 
@@ -4478,7 +4623,12 @@ export default function App() {
   const invoiceDetailId = currentPath.startsWith('/app/invoices/') && currentPath !== '/app/invoices/create'
     ? currentPath.slice('/app/invoices/'.length)
     : null
+  const publicInvoiceId = currentPath.startsWith('/invoice/') ? currentPath.slice('/invoice/'.length) : null
   const selectedInvoice = invoiceDetailId ? runtimeInvoices.find((invoice) => invoice.id === invoiceDetailId) : undefined
+
+  if (publicInvoiceId) {
+    return <PublicInvoicePage invoiceId={publicInvoiceId} />
+  }
 
   if (currentPath.startsWith('/app') && sessionStatus === 'checking') {
     return <main className="grid min-h-screen place-items-center bg-lake-canvas text-sm font-semibold text-slate">Checking session…</main>

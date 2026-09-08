@@ -60,7 +60,7 @@ Status: **WAITING ON DOMAIN REGISTRATION**
 
 ## Invoice
 
-Status: **INVOICE CORE V1 PASS LOCALLY — NOT COMMITTED, PUSHED, OR DEPLOYED**
+Status: **INVOICE CORE V1 CHECKPOINTED — PUBLIC INVOICE V1 PASS LOCALLY, NOT COMMITTED, PUSHED, OR DEPLOYED**
 
 - Supabase is the source of truth; Invoice no longer uses browser `localStorage`.
 - Authenticated account-scoped API supports Create, List, and Detail.
@@ -70,7 +70,14 @@ Status: **INVOICE CORE V1 PASS LOCALLY — NOT COMMITTED, PUSHED, OR DEPLOYED**
 - List, status filters, detail, loading/error/retry, and F5 persistence use real Supabase data.
 - Local runtime verification created a real Active invoice, retained it after F5, then verified server-side transition to Expired.
 - No invoice may be marked Paid until a future payment-verification flow proves payment.
-- Invoice email, public invoice page, payment, receipt, Gateway, and invoice webhook work have not started.
+- Invoice Core V1 was committed and pushed as `cb54cbe90d634f4d290044d723432b603cbde84b` (`Add Invoice Core V1`).
+- Public Invoice V1 adds guest-readable `/invoice/:id` pages backed by a public read-only API and real Supabase invoice data.
+- Seller Invoice Detail can copy the public link.
+- Public fields are limited to invoice identity, masked seller/payer context, amount/asset, memo, status, and timestamps; internal account/session and wallet snapshot fields are not exposed.
+- Active invoices show Pay with Arklake, Connect wallet, and Scan to pay as UI entry states only. They do not execute payment, connect wallets, generate a payment QR, verify payment, or mark Paid.
+- Expired and Paid public states do not show payment entry options.
+- Manual localhost review passed for guest Active access, all three payment entry selectors, and the Expired state without payment options.
+- Invoice email, payment execution, verification, receipt, Gateway, and invoice webhook work have not started.
 
 ### Product constraint for future Public Invoice / Payment
 
@@ -80,7 +87,7 @@ Status: **INVOICE CORE V1 PASS LOCALLY — NOT COMMITTED, PUSHED, OR DEPLOYED**
 - All three paths must converge on the same immutable invoice target: receiving wallet snapshot, asset, amount, and invoice ID.
 - Every path must pass payment verification before the invoice can become Paid.
 - Invoice Core schema and APIs must remain payer-account-optional and must not introduce an Arklake payer account foreign-key requirement.
-- These public invoice and payment paths are not implemented in Invoice Core V1.
+- Public Invoice V1 now exposes the three entry states; their payment paths remain unimplemented.
 
 ## Related ledgers
 
