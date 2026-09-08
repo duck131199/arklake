@@ -1,6 +1,6 @@
 # Arklake project state
 
-Last updated: 2026-09-07
+Last updated: 2026-09-08
 
 This file is the living source of truth for restoring the current Arklake project state across sessions. Read it before continuing implementation or infrastructure work.
 
@@ -60,14 +60,27 @@ Status: **WAITING ON DOMAIN REGISTRATION**
 
 ## Invoice
 
-Status: **INVESTIGATED — IMPLEMENTATION NOT STARTED**
+Status: **INVOICE CORE V1 PASS LOCALLY — NOT COMMITTED, PUSHED, OR DEPLOYED**
 
-- Invoice Core V1 investigation is complete.
-- Current invoice creation, list, filters, and detail use browser `localStorage` only.
-- Current asset is hard-coded to USDC and invoice IDs are browser-generated UUIDs.
-- No invoice Supabase schema, authenticated API, or server-side persistence has been implemented.
+- Supabase is the source of truth; Invoice no longer uses browser `localStorage`.
+- Authenticated account-scoped API supports Create, List, and Detail.
+- Creation snapshots the receiving Circle wallet ID and address and stores payer email, USDC amount, memo, and server-calculated expiry.
+- Internal UUID, human-readable invoice number, and timestamps are generated server-side.
+- Lifecycle is `active | paid | expired`; expired status is applied server-side when invoices are read.
+- List, status filters, detail, loading/error/retry, and F5 persistence use real Supabase data.
+- Local runtime verification created a real Active invoice, retained it after F5, then verified server-side transition to Expired.
 - No invoice may be marked Paid until a future payment-verification flow proves payment.
 - Invoice email, public invoice page, payment, receipt, Gateway, and invoice webhook work have not started.
+
+### Product constraint for future Public Invoice / Payment
+
+- A payer must not be required to have an Arklake account to open or pay an invoice.
+- A future public invoice must be accessible to guests without sign-in.
+- It must support three payment paths: Pay with Arklake, Connect wallet, and Scan to pay / QR.
+- All three paths must converge on the same immutable invoice target: receiving wallet snapshot, asset, amount, and invoice ID.
+- Every path must pass payment verification before the invoice can become Paid.
+- Invoice Core schema and APIs must remain payer-account-optional and must not introduce an Arklake payer account foreign-key requirement.
+- These public invoice and payment paths are not implemented in Invoice Core V1.
 
 ## Related ledgers
 

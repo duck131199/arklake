@@ -2095,88 +2095,68 @@ function AppHomePage({ onNavigate, balances, wallet, circleAuth, email, onBalanc
   )
 }
 
-type InvoiceStatus = 'Draft' | 'Unpaid' | 'Verifying' | 'Paid' | 'Expired'
+type InvoiceStatus = 'Active' | 'Paid' | 'Expired'
 
 type RuntimeInvoice = {
   id: string
+  invoiceNumber: string
   billTo: string
   amount: string
   asset: 'USDC'
   memo: string
   createdAt: Date
   expiresAt: Date
-  status: 'Unpaid'
+  status: InvoiceStatus
+  receivingCircleWalletId: string
+  receivingWalletAddress: string
+  paidAt: Date | null
+  paymentActivityId: string | null
 }
 
-const runtimeInvoicesStorageKey = 'arklake_runtime_invoices_v1'
-
-type StoredRuntimeInvoice = Omit<RuntimeInvoice, 'createdAt' | 'expiresAt'> & {
-  createdAt: string
-  expiresAt: string
+type InvoiceApiRecord = {
+  id: string
+  invoice_number: string
+  payer_email: string
+  amount: string | number
+  asset: 'USDC'
+  memo: string
+  status: 'active' | 'paid' | 'expired'
+  receiving_circle_wallet_id: string
+  receiving_wallet_address: string
+  expires_at: string
+  paid_at: string | null
+  payment_activity_id: string | null
+  created_at: string
 }
 
-const parseStoredRuntimeInvoiceDate = (value: unknown) => {
+const parseInvoiceDate = (value: unknown) => {
   if (typeof value !== 'string') return null
 
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? null : date
 }
 
-const parseStoredRuntimeInvoice = (value: unknown): RuntimeInvoice | null => {
-  if (!value || typeof value !== 'object') return null
-
-  const invoice = value as Partial<StoredRuntimeInvoice>
-  const createdAt = parseStoredRuntimeInvoiceDate(invoice.createdAt)
-  const expiresAt = parseStoredRuntimeInvoiceDate(invoice.expiresAt)
-
-  if (
-    typeof invoice.id !== 'string' ||
-    typeof invoice.billTo !== 'string' ||
-    typeof invoice.amount !== 'string' ||
-    invoice.asset !== 'USDC' ||
-    typeof invoice.memo !== 'string' ||
-    invoice.status !== 'Unpaid' ||
-    !createdAt ||
-    !expiresAt
-  ) {
-    return null
-  }
-
+const parseInvoiceApiRecord = (invoice: InvoiceApiRecord): RuntimeInvoice | null => {
+  const createdAt = parseInvoiceDate(invoice.created_at)
+  const expiresAt = parseInvoiceDate(invoice.expires_at)
+  const paidAt = invoice.paid_at ? parseInvoiceDate(invoice.paid_at) : null
+  if (!createdAt || !expiresAt || (invoice.paid_at && !paidAt)) return null
   return {
     id: invoice.id,
-    billTo: invoice.billTo,
-    amount: invoice.amount,
+    invoiceNumber: invoice.invoice_number,
+    billTo: invoice.payer_email,
+    amount: String(invoice.amount),
     asset: invoice.asset,
     memo: invoice.memo,
     createdAt,
     expiresAt,
-    status: invoice.status,
+    status: invoice.status === 'active' ? 'Active' : invoice.status === 'paid' ? 'Paid' : 'Expired',
+    receivingCircleWalletId: invoice.receiving_circle_wallet_id,
+    receivingWalletAddress: invoice.receiving_wallet_address,
+    paidAt,
+    paymentActivityId: invoice.payment_activity_id,
   }
 }
-
-const loadRuntimeInvoices = () => {
-  try {
-    const storedInvoices = window.localStorage.getItem(runtimeInvoicesStorageKey)
-    if (!storedInvoices) return []
-
-    const parsedInvoices = JSON.parse(storedInvoices)
-    if (!Array.isArray(parsedInvoices)) return []
-
-    const runtimeInvoices = parsedInvoices.map(parseStoredRuntimeInvoice)
-    if (runtimeInvoices.some((invoice) => invoice === null)) return []
-
-    return runtimeInvoices as RuntimeInvoice[]
-  } catch {
-    return []
-  }
-}
-
-const serializeRuntimeInvoices = (invoices: RuntimeInvoice[]): StoredRuntimeInvoice[] =>
-  invoices.map((invoice) => ({
-    ...invoice,
-    createdAt: invoice.createdAt.toISOString(),
-    expiresAt: invoice.expiresAt.toISOString(),
-  }))
 
 const formatInvoiceDate = (date: Date) =>
   date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
@@ -2184,27 +2164,9 @@ const formatInvoiceDate = (date: Date) =>
 const formatInvoiceDateTime = (date: Date) =>
   date.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })
 
-const getExpiryDate = (expiry: string, createdAt: Date) => {
-  const expiresAt = new Date(createdAt)
-
-  if (expiry === '24 hours') {
-    expiresAt.setHours(expiresAt.getHours() + 24)
-  } else if (expiry === '3 days') {
-    expiresAt.setDate(expiresAt.getDate() + 3)
-  } else if (expiry === '30 days') {
-    expiresAt.setDate(expiresAt.getDate() + 30)
-  } else {
-    expiresAt.setDate(expiresAt.getDate() + 7)
-  }
-
-  return expiresAt
-}
-
 function InvoiceStatusBadge({ status }: { status: InvoiceStatus }) {
   const statusClassNames: Record<InvoiceStatus, string> = {
-    Draft: 'border-slate/15 bg-slate/5 text-slate',
-    Unpaid: 'border-amber-200 bg-amber-50 text-amber-700',
-    Verifying: 'border-sky-200 bg-sky-50 text-sky-700',
+    Active: 'border-amber-200 bg-amber-50 text-amber-700',
     Paid: 'border-emerald-200 bg-emerald-50 text-emerald-700',
     Expired: 'border-red-200 bg-red-50 text-red-700',
   }
@@ -2216,21 +2178,17 @@ function InvoiceStatusBadge({ status }: { status: InvoiceStatus }) {
   )
 }
 
-const isRuntimeInvoiceExpired = (invoice: RuntimeInvoice) =>
-  invoice.status === 'Unpaid' && invoice.expiresAt.getTime() <= Date.now()
+const getRuntimeInvoiceStatus = (invoice: RuntimeInvoice): InvoiceStatus => invoice.status
 
-const getRuntimeInvoiceStatus = (invoice: RuntimeInvoice): InvoiceStatus =>
-  isRuntimeInvoiceExpired(invoice) ? 'Expired' : invoice.status
-
-function AppInvoicesPage({ runtimeInvoices = [], onNavigate }: { runtimeInvoices?: RuntimeInvoice[]; onNavigate: (path: string) => void }) {
-  const [statusFilter, setStatusFilter] = useState<'All' | 'Unpaid' | 'Expired'>('All')
+function AppInvoicesPage({ runtimeInvoices = [], loadStatus, error, onRetry, onNavigate }: { runtimeInvoices?: RuntimeInvoice[]; loadStatus: 'loading' | 'ready' | 'error'; error: string; onRetry: () => void; onNavigate: (path: string) => void }) {
+  const [statusFilter, setStatusFilter] = useState<'All' | InvoiceStatus>('All')
   const [searchQuery, setSearchQuery] = useState('')
   const [dateSort, setDateSort] = useState<'Newest first' | 'Oldest first'>('Newest first')
   const [isDateSortOpen, setIsDateSortOpen] = useState(false)
   const dateSortRef = useRef<HTMLDivElement>(null)
   const normalizedSearchQuery = searchQuery.trim().toLowerCase()
   const invoices = runtimeInvoices.map((invoice) => ({
-    invoice: invoice.id,
+    invoice: invoice.invoiceNumber,
     recipient: invoice.billTo,
     memo: invoice.memo,
     amount: `${invoice.amount} ${invoice.asset}`,
@@ -2249,7 +2207,7 @@ function AppInvoicesPage({ runtimeInvoices = [], onNavigate }: { runtimeInvoices
     const diff = b.createdAt.getTime() - a.createdAt.getTime()
     return dateSort === 'Newest first' ? diff : -diff
   })
-  const emptyTitle = normalizedSearchQuery ? 'No matching invoices' : statusFilter === 'Expired' ? 'No expired invoices' : statusFilter === 'Unpaid' ? 'No unpaid invoices' : 'No invoices yet'
+  const emptyTitle = normalizedSearchQuery ? 'No matching invoices' : statusFilter === 'Expired' ? 'No expired invoices' : statusFilter === 'Active' ? 'No active invoices' : statusFilter === 'Paid' ? 'No paid invoices' : 'No invoices yet'
   const emptyDescription = normalizedSearchQuery
     ? 'Try a different search or clear the search field.'
     : statusFilter === 'All'
@@ -2303,7 +2261,7 @@ function AppInvoicesPage({ runtimeInvoices = [], onNavigate }: { runtimeInvoices
         <div className="flex flex-wrap items-center justify-end gap-4 border-b border-lake-border pb-5">
           <div className="flex flex-wrap items-center gap-3">
             <div className="inline-flex rounded-full border border-lake-border bg-lake-canvas p-1 text-sm font-semibold text-slate" aria-label="Filter invoices by status">
-              {(['All', 'Unpaid', 'Expired'] as const).map((filter) => (
+              {(['All', 'Active', 'Paid', 'Expired'] as const).map((filter) => (
                 <button
                   key={filter}
                   type="button"
@@ -2362,7 +2320,14 @@ function AppInvoicesPage({ runtimeInvoices = [], onNavigate }: { runtimeInvoices
           </div>
         </div>
 
-        {sortedInvoices.length === 0 ? (
+        {loadStatus === 'loading' ? (
+          <div className="grid min-h-[360px] place-items-center text-sm font-semibold text-slate">Loading invoices…</div>
+        ) : loadStatus === 'error' ? (
+          <div className="flex min-h-[360px] flex-col items-center justify-center px-6 text-center">
+            <p className="text-sm font-semibold text-red-700">{error}</p>
+            <button type="button" className="mt-4 rounded-full border border-lake-border bg-surface px-5 py-2.5 text-sm font-semibold text-arklake-ink" onClick={onRetry}>Try again</button>
+          </div>
+        ) : sortedInvoices.length === 0 ? (
           <div className="flex min-h-[360px] flex-col items-center justify-center px-6 py-8 text-center">
             <img
               className="h-[154px] w-[206px] object-contain"
@@ -2477,13 +2442,15 @@ function ReviewInvoiceRow({ label, children }: { label: string; children: React.
   )
 }
 
-function AppCreateInvoicePage({ onCreateInvoice, onNavigate }: { onCreateInvoice: (invoice: RuntimeInvoice) => void; onNavigate: (path: string) => void }) {
+function AppCreateInvoicePage({ onCreateInvoice, onNavigate }: { onCreateInvoice: (input: { payerEmail: string; amount: string; memo: string; expiry: string }) => Promise<RuntimeInvoice>; onNavigate: (path: string) => void }) {
   const [email, setEmail] = useState('')
   const [amount, setAmount] = useState('')
   const [memo, setMemo] = useState('')
   const [expiry, setExpiry] = useState('7 days')
   const [errors, setErrors] = useState<CreateInvoiceErrors>({})
   const [step, setStep] = useState<'form' | 'review'>('form')
+  const [isCreating, setIsCreating] = useState(false)
+  const [createError, setCreateError] = useState('')
 
   const validateForm = () => {
     const nextErrors: CreateInvoiceErrors = {}
@@ -2518,21 +2485,18 @@ function AppCreateInvoicePage({ onCreateInvoice, onNavigate }: { onCreateInvoice
     }
   }
 
-  const handleCreateInvoice = () => {
-    const createdAt = new Date()
-    const invoice: RuntimeInvoice = {
-      id: crypto.randomUUID(),
-      billTo: email.trim(),
-      amount: amount.trim(),
-      asset: 'USDC',
-      memo: memo.trim(),
-      createdAt,
-      expiresAt: getExpiryDate(expiry, createdAt),
-      status: 'Unpaid',
+  const handleCreateInvoice = async () => {
+    if (isCreating) return
+    setIsCreating(true)
+    setCreateError('')
+    try {
+      const invoice = await onCreateInvoice({ payerEmail: email.trim(), amount: amount.trim(), memo: memo.trim(), expiry })
+      onNavigate(`/app/invoices/${invoice.id}`)
+    } catch (error) {
+      setCreateError(error instanceof Error ? error.message : 'Invoice could not be created.')
+    } finally {
+      setIsCreating(false)
     }
-
-    onCreateInvoice(invoice)
-    onNavigate(`/app/invoices/${invoice.id}`)
   }
 
   if (step === 'review') {
@@ -2558,9 +2522,12 @@ function AppCreateInvoicePage({ onCreateInvoice, onNavigate }: { onCreateInvoice
             <button type="button" className="inline-flex items-center justify-center rounded-full border border-lake-border bg-surface px-5 py-2.5 text-sm font-semibold text-arklake-ink shadow-sm" onClick={() => setStep('form')}>
               Back
             </button>
-            <button type="button" className="inline-flex items-center justify-center rounded-full bg-arklake-ink px-5 py-2.5 text-sm font-semibold text-white shadow-sm" onClick={handleCreateInvoice}>
-              Create invoice
-            </button>
+            <div className="flex flex-col items-end gap-2">
+              {createError ? <p className="text-sm font-semibold text-red-700">{createError}</p> : null}
+              <button type="button" disabled={isCreating} className="inline-flex items-center justify-center rounded-full bg-arklake-ink px-5 py-2.5 text-sm font-semibold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-60" onClick={() => void handleCreateInvoice()}>
+                {isCreating ? 'Creating…' : 'Create invoice'}
+              </button>
+            </div>
           </div>
         </section>
       </AppShell>
@@ -2582,7 +2549,7 @@ function AppCreateInvoicePage({ onCreateInvoice, onNavigate }: { onCreateInvoice
               aria-describedby="create-invoice-email-helper create-invoice-email-error"
               aria-invalid={errors.email ? 'true' : 'false'}
             />
-            <span id="create-invoice-email-helper" className="mt-2 block text-sm leading-6 text-slate">We'll send the invoice to this email address.</span>
+            <span id="create-invoice-email-helper" className="mt-2 block text-sm leading-6 text-slate">The payer does not need an Arklake account.</span>
             {errors.email ? <span id="create-invoice-email-error" className="mt-1 block text-sm font-semibold text-red-600">{errors.email}</span> : null}
           </label>
 
@@ -2656,7 +2623,7 @@ function AppCreateInvoicePage({ onCreateInvoice, onNavigate }: { onCreateInvoice
   )
 }
 
-function AppInvoiceDetailPage({ invoice, onNavigate }: { invoice: RuntimeInvoice; onNavigate: (path: string) => void }) {
+function AppInvoiceDetailPage({ invoice, wasJustCreated = false, onNavigate }: { invoice: RuntimeInvoice; wasJustCreated?: boolean; onNavigate: (path: string) => void }) {
   const status = getRuntimeInvoiceStatus(invoice)
   const [hasCopiedInvoiceId, setHasCopiedInvoiceId] = useState(false)
 
@@ -2676,10 +2643,12 @@ function AppInvoiceDetailPage({ invoice, onNavigate }: { invoice: RuntimeInvoice
   return (
     <AppShell activeItem="Invoices" title="Invoice detail" subtitle="Review this invoice request." onNavigate={onNavigate}>
       <section className="max-w-3xl rounded-[2rem] border border-lake-border bg-surface p-5 shadow-sm sm:p-6">
+        {wasJustCreated ? <div className="mb-5 rounded-[1.5rem] border border-aqua-mist bg-aqua-mist px-4 py-3 text-sm font-semibold text-arklake-ink">Invoice created</div> : null}
         <div className="flex flex-col gap-3 border-b border-lake-border pb-5 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
-            <p className="text-sm font-semibold text-slate">Invoice ID</p>
-            <h2 className="mt-2 break-all text-xl font-semibold tracking-[-0.04em] text-arklake-ink sm:text-2xl">{invoice.id}</h2>
+            <p className="text-sm font-semibold text-slate">Invoice number</p>
+            <h2 className="mt-2 break-all text-xl font-semibold tracking-[-0.04em] text-arklake-ink sm:text-2xl">{invoice.invoiceNumber}</h2>
+            <p className="mt-2 break-all text-xs font-medium text-slate">ID: {invoice.id}</p>
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-2">
             <InvoiceStatusBadge status={status} />
@@ -4360,14 +4329,32 @@ export default function App() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const [isMobileProductOpen, setIsMobileProductOpen] = useState(false)
   const [runtimeInvoices, setRuntimeInvoices] = useState<RuntimeInvoice[]>([])
-  const [hasHydratedRuntimeInvoices, setHasHydratedRuntimeInvoices] = useState(false)
+  const [invoiceLoadStatus, setInvoiceLoadStatus] = useState<'loading' | 'ready' | 'error'>('loading')
+  const [createdInvoiceId, setCreatedInvoiceId] = useState<string | null>(null)
+  const [invoiceLoadError, setInvoiceLoadError] = useState('')
   const [currentPath, setCurrentPath] = useState(window.location.pathname)
   const [sessionStatus, setSessionStatus] = useState<'checking' | 'authenticated' | 'anonymous'>('checking')
   const [arklakeWallet, setArklakeWallet] = useState<ArklakeWalletIdentity | null>(null)
   const [arklakeBalances, setArklakeBalances] = useState<ArklakeTokenBalance[]>([])
   const [circleAuth, setCircleAuth] = useState<CircleAuthContext | null>(null)
   const [arklakeEmail, setArklakeEmail] = useState('')
-  const [, setRuntimeInvoiceStatusTick] = useState(0)
+
+  const loadInvoices = async () => {
+    setInvoiceLoadStatus('loading')
+    setInvoiceLoadError('')
+    try {
+      const response = await fetch('/api/invoices', { credentials: 'include' })
+      const payload = await response.json().catch(() => null) as { invoices?: InvoiceApiRecord[]; error?: string } | null
+      if (!response.ok || !Array.isArray(payload?.invoices)) throw new Error(payload?.error || 'Invoices could not be loaded.')
+      const parsed = payload.invoices.map(parseInvoiceApiRecord)
+      if (parsed.some((invoice) => invoice === null)) throw new Error('Invoice data could not be read.')
+      setRuntimeInvoices(parsed as RuntimeInvoice[])
+      setInvoiceLoadStatus('ready')
+    } catch (error) {
+      setInvoiceLoadError(error instanceof Error ? error.message : 'Invoices could not be loaded.')
+      setInvoiceLoadStatus('error')
+    }
+  }
 
   const checkSession = async () => {
     try {
@@ -4395,24 +4382,16 @@ export default function App() {
   }
 
   useEffect(() => {
-    setRuntimeInvoices(loadRuntimeInvoices())
-    setHasHydratedRuntimeInvoices(true)
     void checkSession()
   }, [])
 
   useEffect(() => {
-    if (!hasHydratedRuntimeInvoices) return
-
-    window.localStorage.setItem(runtimeInvoicesStorageKey, JSON.stringify(serializeRuntimeInvoices(runtimeInvoices)))
-  }, [hasHydratedRuntimeInvoices, runtimeInvoices])
-
-  useEffect(() => {
-    const intervalId = window.setInterval(() => {
-      setRuntimeInvoiceStatusTick((tick) => tick + 1)
-    }, 60000)
-
-    return () => window.clearInterval(intervalId)
-  }, [])
+    if (sessionStatus === 'authenticated') void loadInvoices()
+    if (sessionStatus === 'anonymous') {
+      setRuntimeInvoices([])
+      setInvoiceLoadStatus('loading')
+    }
+  }, [sessionStatus])
 
   useEffect(() => {
     const handlePopState = () => setCurrentPath(window.location.pathname)
@@ -4434,8 +4413,18 @@ export default function App() {
     window.scrollTo(0, 0)
   }, [currentPath])
 
-  const handleCreateInvoice = (invoice: RuntimeInvoice) => {
+  const handleCreateInvoice = async (input: { payerEmail: string; amount: string; memo: string; expiry: string }) => {
+    const response = await fetch('/api/invoices', {
+      method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
+    })
+    const payload = await response.json().catch(() => null) as { invoice?: InvoiceApiRecord; error?: string } | null
+    if (!response.ok || !payload?.invoice) throw new Error(payload?.error || 'Invoice could not be created.')
+    const invoice = parseInvoiceApiRecord(payload.invoice)
+    if (!invoice) throw new Error('Created invoice data could not be read.')
     setRuntimeInvoices((invoices) => [invoice, ...invoices])
+    setCreatedInvoiceId(invoice.id)
+    setInvoiceLoadStatus('ready')
+    return invoice
   }
 
   const handleAppNavigate = (path: string) => {
@@ -4504,7 +4493,7 @@ export default function App() {
   }
 
   if (currentPath === '/app/invoices') {
-    return <AppInvoicesPage runtimeInvoices={runtimeInvoices} onNavigate={handleAppNavigate} />
+    return <AppInvoicesPage runtimeInvoices={runtimeInvoices} loadStatus={invoiceLoadStatus} error={invoiceLoadError} onRetry={() => void loadInvoices()} onNavigate={handleAppNavigate} />
   }
 
   if (currentPath === '/app/invoices/create') {
@@ -4513,7 +4502,9 @@ export default function App() {
 
 
   if (invoiceDetailId) {
-    return selectedInvoice ? <AppInvoiceDetailPage invoice={selectedInvoice} onNavigate={handleAppNavigate} /> : <AppInvoiceNotFoundPage onNavigate={handleAppNavigate} />
+    if (invoiceLoadStatus === 'loading') return <main className="grid min-h-screen place-items-center bg-lake-canvas text-sm font-semibold text-slate">Loading invoice…</main>
+    if (invoiceLoadStatus === 'error') return <AppInvoicesPage runtimeInvoices={[]} loadStatus="error" error={invoiceLoadError} onRetry={() => void loadInvoices()} onNavigate={handleAppNavigate} />
+    return selectedInvoice ? <AppInvoiceDetailPage invoice={selectedInvoice} wasJustCreated={createdInvoiceId === selectedInvoice.id} onNavigate={handleAppNavigate} /> : <AppInvoiceNotFoundPage onNavigate={handleAppNavigate} />
   }
 
   if (currentPath === '/app/wallet') {
