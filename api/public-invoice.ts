@@ -6,7 +6,7 @@ type VercelResponse = { status: (code: number) => VercelResponse; json: (body: o
 
 const required = (name: string) => { const value = process.env[name]; if (!value) throw new Error(`${name} is not configured`); return value }
 const supabaseClient = () => createClient(required('SUPABASE_URL'), required('SUPABASE_SERVICE_ROLE_KEY'), { auth: { persistSession: false, autoRefreshToken: false } })
-const publicFields = 'id,invoice_number,account_id,payer_email,amount,asset,memo,status,expires_at,created_at'
+const publicFields = 'id,invoice_number,account_id,payer_email,amount,asset,memo,status,expires_at,paid_at,created_at'
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Cache-Control', 'no-store')
@@ -30,7 +30,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { data: invoice, error } = await supabase.from('invoices').select(publicFields).eq('id', id).maybeSingle<{
       id: string; invoice_number: string; account_id: string; payer_email: string; amount: string | number; asset: string; memo: string;
-      status: 'active' | 'paid' | 'expired'; expires_at: string; created_at: string
+      status: 'active' | 'paid' | 'expired'; expires_at: string; paid_at: string | null; created_at: string
     }>()
     if (error) throw error
     if (!invoice) return res.status(404).json({ error: 'Invoice not found.' })
@@ -48,6 +48,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         status: invoice.status,
         createdAt: invoice.created_at,
         expiresAt: invoice.expires_at,
+        paidAt: invoice.paid_at,
       },
     })
   } catch (error) {

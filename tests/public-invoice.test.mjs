@@ -32,6 +32,14 @@ test('public response uses an explicit payer-safe field allowlist', () => {
   assert.doesNotMatch(source, /accountId:|account_id: invoice\.account_id/)
 })
 
+test('public paid invoice exposes and renders the trusted paid timestamp', () => {
+  const endpoint = readFileSync(new URL('../api/public-invoice.ts', import.meta.url), 'utf8')
+  const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
+  assert.match(endpoint, /paidAt: invoice\.paid_at/)
+  assert.match(app, /invoice\.status === 'paid' && invoice\.paidAt/)
+  assert.match(app, />Paid at</)
+})
+
 test('public UI exposes all three payment entry options', () => {
   const source = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
   assert.match(source, /Pay with Arklake/)

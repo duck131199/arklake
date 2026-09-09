@@ -6,12 +6,12 @@ import { maskInvoiceEmail } from '../server/invoice-core.js'
 type VercelRequest = { method?: string; headers: { cookie?: string }; query?: { id?: string | string[]; scope?: string | string[]; timeZone?: string | string[] } }
 type VercelResponse = { status: (code: number) => VercelResponse; json: (body: object) => unknown; setHeader: (name: string, value: string | number) => void; end: (body: Uint8Array) => unknown }
 type Session = { account_id: string; expires_at: string; revoked_at: string | null }
-type InvoiceRow = { id: string; invoice_number: string; account_id: string; payer_email: string; amount: string | number; asset: string; memo: string; status: 'active' | 'paid' | 'expired'; expires_at: string; created_at: string }
+type InvoiceRow = { id: string; invoice_number: string; account_id: string; payer_email: string; amount: string | number; asset: string; memo: string; status: 'active' | 'paid' | 'expired'; expires_at: string; paid_at: string | null; created_at: string }
 
 const cookieName = 'arklake_session'
 const required = (name: string) => { const value = process.env[name]; if (!value) throw new Error(`${name} is not configured`); return value }
 const supabaseClient = () => createClient(required('SUPABASE_URL'), required('SUPABASE_SERVICE_ROLE_KEY'), { auth: { persistSession: false, autoRefreshToken: false } })
-const fields = 'id,invoice_number,account_id,payer_email,amount,asset,memo,status,expires_at,created_at'
+const fields = 'id,invoice_number,account_id,payer_email,amount,asset,memo,status,expires_at,paid_at,created_at'
 
 function sessionId(cookieHeader?: string) {
   const value = (cookieHeader || '').split(';').map((part) => part.trim()).find((part) => part.startsWith(`${cookieName}=`))?.slice(cookieName.length + 1)
@@ -67,7 +67,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       seller: scope === 'seller' ? seller?.email || 'Arklake seller' : seller?.email ? maskInvoiceEmail(seller.email) : 'Arklake seller',
       payer: scope === 'seller' ? invoice.payer_email : maskInvoiceEmail(invoice.payer_email),
       amount: String(invoice.amount), asset: invoice.asset, memo: invoice.memo, status: invoice.status,
-      createdAt: invoice.created_at, expiresAt: invoice.expires_at, timeZone,
+      createdAt: invoice.created_at, expiresAt: invoice.expires_at, paidAt: invoice.paid_at, timeZone,
     }
     const pdf = await createInvoicePdf(pdfData)
     res.setHeader('Content-Type', 'application/pdf')

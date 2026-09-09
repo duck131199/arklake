@@ -3,7 +3,7 @@ import { arklakeLogoPngBase64 } from './arklake-logo.js'
 
 export type InvoicePdfData = {
   invoiceNumber: string; seller: string; payer: string; amount: string; asset: string; memo: string
-  status: 'active' | 'paid' | 'expired'; createdAt: string; expiresAt: string; timeZone?: string
+  status: 'active' | 'paid' | 'expired'; createdAt: string; expiresAt: string; paidAt?: string | null; timeZone?: string
 }
 
 const safePdfText = (value: string) => value.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^\x20-\x7e]/g, '?')
@@ -41,38 +41,37 @@ export async function createInvoicePdf(invoice: InvoicePdfData) {
   page.drawText('INVOICE', { x: 481, y: 791, size: 10, font: bold, color: slate })
   page.drawLine({ start: { x: left, y: 772 }, end: { x: right, y: 772 }, thickness: 2, color: aqua })
 
-  page.drawText('Invoice number', { x: left, y: 733, size: 9, font: regular, color: slate })
-  page.drawText(safePdfText(invoice.invoiceNumber), { x: left, y: 708, size: 17, font: bold, color: ink })
+  page.drawText('Invoice number', { x: left, y: 735, size: 8, font: bold, color: slate })
+  page.drawText(safePdfText(invoice.invoiceNumber), { x: left, y: 710, size: 16, font: bold, color: ink })
   const status = invoice.status.toUpperCase()
   const statusWidth = bold.widthOfTextAtSize(status, 9) + 22
   page.drawRectangle({ x: right - statusWidth, y: 708, width: statusWidth, height: 23, color: invoice.status === 'active' ? mist : rgb(0.97, 0.96, 0.94), borderColor: invoice.status === 'active' ? aqua : border, borderWidth: 0.8 })
   page.drawText(status, { x: right - statusWidth + 11, y: 716, size: 9, font: bold, color: invoice.status === 'active' ? aqua : slate })
 
-  page.drawRectangle({ x: left, y: 606, width: right - left, height: 76, color: mist, borderColor: border, borderWidth: 0.8 })
-  page.drawText('TOTAL DUE', { x: 72, y: 654, size: 9, font: bold, color: slate })
-  page.drawText(`${safePdfText(invoice.amount)} ${safePdfText(invoice.asset)}`, { x: 72, y: 622, size: 24, font: bold, color: ink })
+  page.drawRectangle({ x: left, y: 610, width: right - left, height: 78, color: mist, borderColor: border, borderWidth: 0.7 })
+  page.drawText('AMOUNT DUE', { x: 72, y: 658, size: 8, font: bold, color: slate })
+  page.drawText(`${safePdfText(invoice.amount)} ${safePdfText(invoice.asset)}`, { x: 72, y: 626, size: 25, font: bold, color: ink })
+  page.drawText('PAYMENT DETAILS', { x: 405, y: 658, size: 8, font: bold, color: slate })
+  page.drawText(`${safePdfText(invoice.asset)} · Arc Testnet`, { x: 405, y: 637, size: 9, font: regular, color: slate })
 
-  page.drawText('PARTIES', { x: left, y: 568, size: 9, font: bold, color: slate })
-  page.drawRectangle({ x: left, y: 497, width: 237, height: 54, borderColor: border, borderWidth: 0.8 })
-  page.drawRectangle({ x: 306, y: 497, width: 237, height: 54, borderColor: border, borderWidth: 0.8 })
-  drawLabelValue(page, regular, bold, 'Seller', invoice.seller, 67, 532, 205)
-  drawLabelValue(page, regular, bold, 'Payer', invoice.payer, 321, 532, 205)
+  page.drawText('FROM / BILL TO', { x: left, y: 570, size: 8, font: bold, color: slate })
+  page.drawRectangle({ x: left, y: 497, width: 237, height: 56, borderColor: border, borderWidth: 0.7 })
+  page.drawRectangle({ x: 306, y: 497, width: 237, height: 56, borderColor: border, borderWidth: 0.7 })
+  drawLabelValue(page, regular, bold, 'From', invoice.seller, 67, 533, 205)
+  drawLabelValue(page, regular, bold, 'Bill to', invoice.payer, 321, 533, 205)
 
-  page.drawText('DATES', { x: left, y: 462, size: 9, font: bold, color: slate })
+  page.drawText('DATES', { x: left, y: 462, size: 8, font: bold, color: slate })
   drawLabelValue(page, regular, bold, 'Created', pdfDate(invoice.createdAt, timeZone), left, 435, 220)
-  drawLabelValue(page, regular, bold, invoice.status === 'expired' ? 'Expired at' : 'Expires', pdfDate(invoice.expiresAt, timeZone), 306, 435, 237)
-  page.drawLine({ start: { x: left, y: 392 }, end: { x: right, y: 392 }, thickness: 0.8, color: border })
+  drawLabelValue(page, regular, bold, invoice.status === 'paid' ? 'Paid at' : invoice.status === 'expired' ? 'Expired at' : 'Expires', invoice.status === 'paid' && invoice.paidAt ? pdfDate(invoice.paidAt, timeZone) : pdfDate(invoice.expiresAt, timeZone), 306, 435, 237)
+  page.drawLine({ start: { x: left, y: 394 }, end: { x: right, y: 394 }, thickness: 0.7, color: border })
 
-  page.drawText('MEMO', { x: left, y: 360, size: 9, font: bold, color: slate })
-  page.drawText(safePdfText(invoice.memo || '-').slice(0, 92), { x: left, y: 333, size: 11, font: regular, color: ink, maxWidth: right - left, lineHeight: 16 })
+  page.drawText('DESCRIPTION', { x: left, y: 362, size: 8, font: bold, color: slate })
+  page.drawText(safePdfText(invoice.memo || '-').slice(0, 92), { x: left, y: 335, size: 11, font: regular, color: ink, maxWidth: right - left, lineHeight: 16 })
 
-  const message = invoice.status === 'expired'
-    ? 'This invoice has expired and is no longer payable.'
-    : invoice.status === 'active'
-      ? `Payment of ${safePdfText(invoice.amount)} ${safePdfText(invoice.asset)} is due by the expiry time above.`
-      : 'This invoice is marked paid. Payment verification details are not included in this document.'
-  page.drawRectangle({ x: left, y: 252, width: right - left, height: 48, color: invoice.status === 'active' ? mist : rgb(0.97, 0.96, 0.94) })
-  page.drawText(message, { x: 68, y: 271, size: 10, font: invoice.status === 'expired' ? bold : regular, color: invoice.status === 'active' ? ink : slate })
+  if (invoice.status === 'expired') {
+    page.drawRectangle({ x: left, y: 258, width: right - left, height: 46, color: rgb(0.97, 0.96, 0.94) })
+    page.drawText('This invoice has expired and is no longer payable.', { x: 68, y: 276, size: 10, font: bold, color: slate })
+  }
 
   page.drawLine({ start: { x: left, y: 98 }, end: { x: right, y: 98 }, thickness: 0.7, color: border })
   page.drawText('Arklake', { x: left, y: 72, size: 10, font: bold, color: ink })

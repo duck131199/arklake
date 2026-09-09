@@ -2702,6 +2702,7 @@ function AppInvoiceDetailPage({ invoice, wasJustCreated = false, onNavigate }: {
           <ReviewInvoiceRow label="Memo">{invoice.memo || '—'}</ReviewInvoiceRow>
           <ReviewInvoiceRow label="Created">{formatInvoiceDateTime(invoice.createdAt)}</ReviewInvoiceRow>
           <ReviewInvoiceRow label={status === 'Expired' ? 'Expired at' : 'Expires'}>{formatInvoiceDateTime(invoice.expiresAt)}</ReviewInvoiceRow>
+          {status === 'Paid' && invoice.paidAt ? <ReviewInvoiceRow label="Paid at">{formatInvoiceDateTime(invoice.paidAt)}</ReviewInvoiceRow> : null}
         </div>
 
         <div className="mt-8">
@@ -2752,6 +2753,7 @@ type PublicInvoiceRecord = {
   status: 'active' | 'paid' | 'expired'
   createdAt: string
   expiresAt: string
+  paidAt: string | null
 }
 
 type PublicPaymentOption = 'arklake' | 'wallet' | 'scan'
@@ -3133,6 +3135,7 @@ function PublicInvoicePage({ invoiceId, sessionStatus, wallet, balances, circleA
                 <div><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate">Memo</p><p className="mt-2 text-sm font-semibold">{invoice.memo || '—'}</p></div>
                 <div><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate">Created</p><p className="mt-2 text-sm font-semibold">{formatInvoiceDateTime(new Date(invoice.createdAt))}</p></div>
                 <div><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate">{invoice.status === 'expired' ? 'Expired' : 'Expires'}</p><p className="mt-2 text-sm font-semibold">{formatInvoiceDateTime(new Date(invoice.expiresAt))}</p></div>
+                {invoice.status === 'paid' && invoice.paidAt ? <div><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate">Paid at</p><p className="mt-2 text-sm font-semibold">{formatInvoiceDateTime(new Date(invoice.paidAt))}</p></div> : null}
               </div>
 
               {invoice.status === 'expired' ? (

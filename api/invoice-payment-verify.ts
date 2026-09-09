@@ -58,7 +58,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!/^[0-9a-f-]{36}$/i.test(intentId) || intentToken.length < 32) return res.status(400).json({ error: 'Payment intent credentials are required.' })
     const publicTokenHash = createHash('sha256').update(intentToken).digest('hex')
     const { data: intent, error: intentError } = await supabase.from('invoice_payment_intents')
-      .select('id').eq('id', intentId).eq('invoice_id', invoiceId).eq('public_token_hash', publicTokenHash).eq('tx_hash', txHash).maybeSingle<{ id: string }>()
+      .select('id,status').eq('id', intentId).eq('invoice_id', invoiceId).eq('public_token_hash', publicTokenHash).eq('tx_hash', txHash)
+      .maybeSingle<{ id: string; status: string }>()
     if (intentError) throw intentError
     if (!intent) return res.status(409).json({ error: 'This transaction is not bound to this payment intent.' })
     const { data: invoice, error } = await supabase.from('invoices')
@@ -71,7 +72,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       await supabase.from('invoice_payment_intents').update({ status: 'paid', updated_at: new Date().toISOString() }).eq('id', intentId)
       return res.status(200).json({ paid: true, txHash, idempotent: true })
     }
-    if (invoice.status === 'expired' || new Date(invoice.expires_at).getTime() <= Date.now()) return res.status(409).json({ error: 'This invoice has expired.' })
+    const mayFinishSubmittedPayment = intent.status === 'submitted' || intent.status === 'confirming'
+    if ((invoice.status === 'expired' || new Date(invoice.expires_at).getTime() <= Date.now()) && !mayFinishSubmittedPayment) {
+      return res.status(409).json({ error: 'This invoice has expired.' })
+    }
 
     const [chainId, receiptValue, latestBlock] = await Promise.all([
       rpc('eth_chainId'), rpc('eth_getTransactionReceipt', [txHash]), rpc('eth_blockNumber'),
