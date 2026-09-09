@@ -5045,6 +5045,15 @@ export default function App() {
     return <PublicInvoicePage invoiceId={publicInvoiceId} sessionStatus={sessionStatus} wallet={arklakeWallet} balances={arklakeBalances} circleAuth={circleAuth} email={arklakeEmail} onNavigate={handleAppNavigate} onBalancesRefresh={setArklakeBalances} onCircleAuthRefresh={handleCircleAuthRefresh} />
   }
 
+  const isSessionEntryRoute = currentPath === '/' || currentPath === '/auth/sign-in'
+  if (isSessionEntryRoute && sessionStatus === 'checking') {
+    return <main className="grid min-h-screen place-items-center bg-lake-canvas text-sm font-semibold text-slate">Checking session…</main>
+  }
+
+  if (isSessionEntryRoute && sessionStatus === 'authenticated') {
+    return <AppRedirect to="/app" onNavigate={setCurrentPath} />
+  }
+
   if (currentPath.startsWith('/app') && sessionStatus === 'checking') {
     return <main className="grid min-h-screen place-items-center bg-lake-canvas text-sm font-semibold text-slate">Checking session…</main>
   }
@@ -5084,7 +5093,7 @@ export default function App() {
     return <AppAccountPage onNavigate={handleAppNavigate} onSignOut={handleSignOut} wallet={arklakeWallet} email={arklakeEmail} />
   }
 
-  if (window.location.pathname === '/auth/sign-in') {
+  if (currentPath === '/auth/sign-in') {
     return <AuthPage onSignedIn={handleSignedIn} />
   }
 

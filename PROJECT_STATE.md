@@ -78,6 +78,7 @@ Status: **INVOICE CORE + PUBLIC INVOICE V1 CHECKPOINTED — PAYMENT ENTRY + DOWN
 - Expired and Paid public states do not show payment entry options.
 - Manual localhost review passed for guest Active access, all three payment entry selectors, and the Expired state without payment options.
 - Public Invoice logo navigation keeps guest users on `/` and returns an authenticated session to `/app` without changing auth/session state.
+- Session entry routing now waits for restore: authenticated visits to `/` or `/auth/sign-in` return to `/app` without initializing Circle sign-in again, while anonymous and signed-out users still see Landing or Sign in.
 - Public Invoice V1 was committed and pushed as `fd4876ffec4640204654d422447e89125569761e` (`Add Public Invoice V1`).
 - Pay with Arklake V1 reuses the existing Arklake session, Circle Email OTP login, wallet balance data, transfer preparation endpoint, Circle challenge, and signing re-auth panel.
 - An anonymous payer returns to the same public invoice after OTP and stops at Review payment; payment is never auto-submitted after authentication.
