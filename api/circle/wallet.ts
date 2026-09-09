@@ -1,7 +1,12 @@
+import { createHash } from 'node:crypto'
+import { createClient } from '@supabase/supabase-js'
+import { getCircleRecoverySession } from '../auth/session.js'
+
 const CIRCLE_WALLETS_URL = 'https://api.circle.com/v1/w3s/wallets'
 const CIRCLE_USER_INITIALIZE_URL = 'https://api.circle.com/v1/w3s/user/initialize'
 const CIRCLE_TRANSFER_URL = 'https://api.circle.com/v1/w3s/user/transactions/transfer'
 const CIRCLE_TRANSACTIONS_URL = 'https://api.circle.com/v1/w3s/transactions'
+const CIRCLE_CHALLENGES_URL = 'https://api.circle.com/v1/w3s/user/challenges'
 const arklakeBlockchain = 'ARC-TESTNET'
 const arklakeAccountType = 'SCA'
 const arklakeCanonicalUsdcAddress = '0x3600000000000000000000000000000000000000'
@@ -9,6 +14,7 @@ const arklakeCanonicalUsdcAddress = '0x3600000000000000000000000000000000000000'
 type VercelRequest = {
   method?: string
   body?: unknown
+  headers: { cookie?: string }
 }
 
 type VercelResponse = {
@@ -31,6 +37,23 @@ const getCircleApiKey = () => {
   const circleApiKey = process.env.CIRCLE_API_KEY
   if (!circleApiKey) throw new Error('Circle API key is not configured')
   return circleApiKey
+}
+
+const required = (name: string) => { const value = process.env[name]; if (!value) throw new Error(`${name} is not configured`); return value }
+const supabaseClient = () => createClient(required('SUPABASE_URL'), required('SUPABASE_SERVICE_ROLE_KEY'), { auth: { persistSession: false, autoRefreshToken: false } })
+const tokenHash = (token: string) => createHash('sha256').update(token).digest('hex')
+const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+const getIntentCredentials = (body: unknown) => {
+  if (!isRecord(body) || typeof body.intentId !== 'string' || !uuid.test(body.intentId)
+    || typeof body.intentToken !== 'string' || body.intentToken.length < 32) throw new Error('Invalid payment intent')
+  return { intentId: body.intentId, intentTokenHash: tokenHash(body.intentToken) }
+}
+
+const circleHeaders = (userToken: string) => ({ accept: 'application/json', Authorization: `Bearer ${getCircleApiKey()}`, 'X-User-Token': userToken })
+
+const markAttemptFailed = async (intentId: string, intentTokenHash: string) => {
+  await supabaseClient().rpc('fail_arklake_invoice_payment_intent', { p_intent_id: intentId, p_public_token_hash: intentTokenHash })
 }
 
 const getUserToken = (body: unknown) => {
@@ -150,7 +173,9 @@ const createTransferTransaction = async (userToken: string, body: unknown) => {
   const walletId = getWalletId(body)
   const destinationAddress = getDestinationAddress(body)
   const amount = getTransferAmount(body)
-  const referenceId = getReferenceId(body)
+  const isInvoicePayment = isRecord(body) && typeof body.intentId === 'string' && typeof body.intentToken === 'string'
+  const intentCredentials = isInvoicePayment ? getIntentCredentials(body) : null
+  const referenceId = intentCredentials?.intentId || getReferenceId(body)
 
   const walletsResult = await listWallets(userToken)
   if (!walletsResult.ok || !isRecord(walletsResult.payload) || !Array.isArray(walletsResult.payload.wallets)) {
@@ -175,6 +200,19 @@ const createTransferTransaction = async (userToken: string, body: unknown) => {
     return { ok: false, status: 400, payload: { error: 'Amount exceeds available USDC balance' } }
   }
 
+  let circleIdempotencyKey: string = crypto.randomUUID()
+  if (intentCredentials) {
+    const { data: startData, error: startError } = await supabaseClient().rpc('start_arklake_invoice_payment_intent', {
+      p_intent_id: intentCredentials.intentId, p_public_token_hash: intentCredentials.intentTokenHash, p_wallet_id: walletId,
+    })
+    if (startError) throw startError
+    const start = startData as { result?: string; idempotency_key?: string } | null
+    if (!start || !['started', 'idempotent'].includes(start.result || '') || !start.idempotency_key) {
+      return { ok: false, status: 409, payload: { error: start?.result === 'already_in_progress' ? 'Another payment is already being confirmed for this invoice.' : 'This payment attempt can no longer be submitted.' } }
+    }
+    circleIdempotencyKey = start.idempotency_key
+  }
+
   const circleResponse = await fetch(CIRCLE_TRANSFER_URL, {
     method: 'POST',
     headers: {
@@ -183,7 +221,7 @@ const createTransferTransaction = async (userToken: string, body: unknown) => {
       'X-User-Token': userToken,
     },
     body: JSON.stringify({
-      idempotencyKey: crypto.randomUUID(),
+      idempotencyKey: circleIdempotencyKey,
       destinationAddress,
       walletId,
       amounts: [amount],
@@ -196,36 +234,70 @@ const createTransferTransaction = async (userToken: string, body: unknown) => {
   const circlePayload: unknown = await circleResponse.json()
 
   if (!circleResponse.ok) {
-    return { ok: false, status: circleResponse.status, payload: isRecord(circlePayload) ? circlePayload : { error: 'Circle transfer request failed' } }
+    if (intentCredentials) await markAttemptFailed(intentCredentials.intentId, intentCredentials.intentTokenHash)
+    const circleError = isRecord(circlePayload) && typeof circlePayload.message === 'string' ? circlePayload.message : 'Circle transfer request failed'
+    return { ok: false, status: circleResponse.status, payload: { error: circleError, retryAllowed: true } }
   }
 
   if (!isRecord(circlePayload) || !isRecord(circlePayload.data) || typeof circlePayload.data.challengeId !== 'string') {
-    return { ok: false, status: 502, payload: { error: 'Invalid Circle transfer response' } }
+    return { ok: false, status: 502, payload: { error: 'Invalid Circle transfer response; this payment attempt remains locked for recovery.' } }
   }
 
-  return { ok: true, status: 200, payload: { challengeId: circlePayload.data.challengeId, referenceId } }
+  if (intentCredentials) {
+    const { data: challengeData, error: challengeError } = await supabaseClient().rpc('record_arklake_invoice_payment_challenge', {
+      p_intent_id: intentCredentials.intentId, p_public_token_hash: intentCredentials.intentTokenHash, p_challenge_id: circlePayload.data.challengeId,
+    })
+    if (challengeError || (challengeData as { result?: string } | null)?.result !== 'recorded') {
+      return { ok: false, status: 502, payload: { error: 'Circle prepared the payment, but recovery state could not be recorded. This attempt remains locked.' } }
+    }
+  }
+
+  return { ok: true, status: 200, payload: { challengeId: circlePayload.data.challengeId } }
 }
 
-const resolveTransferTransactionHash = async (userToken: string, body: unknown) => {
-  const walletId = getWalletId(body)
-  const referenceId = getReferenceId(body)
-  const walletsResult = await listWallets(userToken)
-  if (!walletsResult.ok || !isRecord(walletsResult.payload) || !Array.isArray(walletsResult.payload.wallets)
-    || !walletsResult.payload.wallets.some((wallet) => isArklakeWallet(wallet, walletId))) {
-    return { ok: false, status: 403, payload: { error: 'Wallet is not an Arklake Arc Testnet wallet' } }
+const resolveTransferTransactionHash = async (body: unknown, cookieHeader: string | undefined) => {
+  const { intentId, intentTokenHash } = getIntentCredentials(body)
+  const recoverySession = await getCircleRecoverySession(cookieHeader)
+  if (!recoverySession) return { ok: false, status: 401, payload: { error: 'Sign in to continue checking this payment.' } }
+  const { userToken, walletId } = recoverySession
+  const supabase = supabaseClient()
+  const { data: attempt, error: attemptError } = await supabase.from('invoice_payment_intents')
+    .select('id,payer_wallet_id,circle_challenge_id,circle_transaction_id,status')
+    .eq('id', intentId).eq('public_token_hash', intentTokenHash).eq('payment_rail', 'arklake').maybeSingle<{
+      id: string; payer_wallet_id: string | null; circle_challenge_id: string | null; circle_transaction_id: string | null; status: string
+    }>()
+  if (attemptError) throw attemptError
+  if (!attempt || attempt.payer_wallet_id !== walletId) return { ok: false, status: 404, payload: { error: 'Payment attempt not found.' } }
+  if (attempt.status === 'failed') return { ok: false, status: 409, payload: { error: 'Circle reported that this payment failed.', retryAllowed: true } }
+  if (!attempt.circle_challenge_id) return { ok: true, status: 200, payload: { pending: true } }
+
+  let transactionId = attempt.circle_transaction_id
+  if (!transactionId) {
+    const challengeResponse = await fetch(`${CIRCLE_CHALLENGES_URL}/${encodeURIComponent(attempt.circle_challenge_id)}`, { headers: circleHeaders(userToken) })
+    const challengePayload: unknown = await challengeResponse.json()
+    if (!challengeResponse.ok) return { ok: false, status: challengeResponse.status, payload: isRecord(challengePayload) ? challengePayload : { error: 'Circle challenge lookup failed' } }
+    const challenge = isRecord(challengePayload) && isRecord(challengePayload.data) && isRecord(challengePayload.data.challenge) ? challengePayload.data.challenge : null
+    if (!challenge || challenge.id !== attempt.circle_challenge_id) return { ok: false, status: 502, payload: { error: 'Invalid Circle challenge response' } }
+    if (challenge.status === 'FAILED' || challenge.status === 'DENIED' || challenge.status === 'CANCELLED') {
+      await markAttemptFailed(intentId, intentTokenHash)
+      return { ok: false, status: 409, payload: { error: 'Circle reported that this payment failed.', retryAllowed: true } }
+    }
+    transactionId = Array.isArray(challenge.correlationIds) ? challenge.correlationIds.find((value): value is string => typeof value === 'string' && uuid.test(value)) || null : null
+    if (!transactionId) return { ok: true, status: 200, payload: { pending: true } }
+    const { error: correlationError } = await supabase.from('invoice_payment_intents')
+      .update({ circle_transaction_id: transactionId, status: 'confirming', updated_at: new Date().toISOString() })
+      .eq('id', intentId).eq('public_token_hash', intentTokenHash).is('circle_transaction_id', null)
+    if (correlationError) throw correlationError
   }
-  const query = new URLSearchParams({ walletIds: walletId, includeAll: 'true', pageSize: '50', order: 'DESC' })
-  const circleResponse = await fetch(`${CIRCLE_TRANSACTIONS_URL}?${query}`, {
-    headers: { accept: 'application/json', Authorization: `Bearer ${getCircleApiKey()}`, 'X-User-Token': userToken },
-  })
+
+  const circleResponse = await fetch(`${CIRCLE_TRANSACTIONS_URL}/${encodeURIComponent(transactionId)}`, { headers: circleHeaders(userToken) })
   const circlePayload: unknown = await circleResponse.json()
   if (!circleResponse.ok) return { ok: false, status: circleResponse.status, payload: isRecord(circlePayload) ? circlePayload : { error: 'Circle transaction lookup failed' } }
-  const transactions = isRecord(circlePayload) && isRecord(circlePayload.data) && Array.isArray(circlePayload.data.transactions) ? circlePayload.data.transactions : null
-  if (!transactions) return { ok: false, status: 502, payload: { error: 'Invalid Circle transaction response' } }
-  const transaction = transactions.find((candidate) => isRecord(candidate) && candidate.refId === referenceId && candidate.walletId === walletId)
-  if (!isRecord(transaction)) return { ok: true, status: 200, payload: { pending: true } }
+  const transaction = isRecord(circlePayload) && isRecord(circlePayload.data) && isRecord(circlePayload.data.transaction) ? circlePayload.data.transaction : null
+  if (!transaction || transaction.id !== transactionId || transaction.walletId !== walletId) return { ok: false, status: 502, payload: { error: 'Circle returned a mismatched transaction.' } }
   if (transaction.state === 'FAILED' || transaction.state === 'DENIED' || transaction.state === 'CANCELLED') {
-    return { ok: false, status: 409, payload: { error: 'Circle reported that this payment failed.' } }
+    await markAttemptFailed(intentId, intentTokenHash)
+    return { ok: false, status: 409, payload: { error: 'Circle reported that this payment failed.', retryAllowed: true } }
   }
   return typeof transaction.txHash === 'string' && /^0x[0-9a-fA-F]{64}$/.test(transaction.txHash)
     ? { ok: true, status: 200, payload: { txHash: transaction.txHash.toLowerCase() } }
@@ -242,19 +314,20 @@ export default async function handler(request: VercelRequest, response: VercelRe
   }
 
   try {
-    const userToken = getUserToken(request.body)
-
     if (request.body.action === 'listWallets') {
+      const userToken = getUserToken(request.body)
       const result = await listWallets(userToken)
       return jsonResponse(response, isRecord(result.payload) ? result.payload : { error: 'Circle wallet request failed' }, result.status)
     }
 
     if (request.body.action === 'listBalances') {
+      const userToken = getUserToken(request.body)
       const result = await listBalances(userToken, getWalletId(request.body))
       return jsonResponse(response, isRecord(result.payload) ? result.payload : { error: 'Circle balance request failed' }, result.status)
     }
 
     if (request.body.action === 'initializeUser') {
+      const userToken = getUserToken(request.body)
       const circleResponse = await fetch(CIRCLE_USER_INITIALIZE_URL, {
         method: 'POST',
         headers: {
@@ -283,18 +356,19 @@ export default async function handler(request: VercelRequest, response: VercelRe
     }
 
     if (request.body.action === 'createTransferTransaction') {
+      const userToken = getUserToken(request.body)
       const result = await createTransferTransaction(userToken, request.body)
       return jsonResponse(response, isRecord(result.payload) ? result.payload : { error: 'Circle transfer request failed' }, result.status)
     }
 
     if (request.body.action === 'resolveTransferTransactionHash') {
-      const result = await resolveTransferTransactionHash(userToken, request.body)
+      const result = await resolveTransferTransactionHash(request.body, request.headers.cookie)
       return jsonResponse(response, isRecord(result.payload) ? result.payload : { error: 'Circle transaction lookup failed' }, result.status)
     }
 
     return jsonResponse(response, { error: 'Unknown action' }, 400)
   } catch (error) {
-    if (error instanceof Error && (error.message === 'Missing userToken' || error.message === 'Missing walletId' || error.message === 'Invalid destinationAddress' || error.message === 'Invalid amount' || error.message === 'Invalid referenceId')) {
+    if (error instanceof Error && (error.message === 'Missing userToken' || error.message === 'Missing walletId' || error.message === 'Invalid destinationAddress' || error.message === 'Invalid amount' || error.message === 'Invalid referenceId' || error.message === 'Invalid payment intent')) {
       return jsonResponse(response, { error: error.message }, 400)
     }
     if (error instanceof Error && error.message === 'Circle API key is not configured') {

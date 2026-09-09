@@ -15,9 +15,9 @@ export type InvoicePaymentIntent = {
   expiresAt: string
 }
 
-export async function createInvoicePaymentIntent(invoiceId: string, fetcher: typeof fetch = fetch) {
+export async function createInvoicePaymentIntent(invoiceId: string, fetcher: typeof fetch = fetch, paymentRail: 'generic' | 'arklake' = 'generic') {
   const response = await fetcher('/api/invoice-payment-intent', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'create', invoiceId }),
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'create', invoiceId, paymentRail }),
   })
   const payload = await response.json().catch(() => null) as { intent?: InvoicePaymentIntent; error?: string } | null
   if (!response.ok || !payload?.intent) throw new Error(payload?.error || 'Payment intent could not be created.')
@@ -31,6 +31,16 @@ export async function bindInvoicePaymentIntent(intent: InvoicePaymentIntent, txH
   })
   const payload = await response.json().catch(() => null) as { bound?: boolean; error?: string } | null
   if (!response.ok || !payload?.bound) throw new Error(payload?.error || 'Submitted transaction could not be bound to this invoice.')
+}
+
+export async function getArklakePaymentIntentStatus(intent: InvoicePaymentIntent, fetcher: typeof fetch = fetch) {
+  const response = await fetcher('/api/invoice-payment-intent', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'status', intentId: intent.id, token: intent.token }),
+  })
+  const payload = await response.json().catch(() => null) as { status?: string; recoverable?: boolean; error?: string } | null
+  if (!response.ok || !payload?.status) throw new Error(payload?.error || 'Payment attempt status could not be loaded.')
+  return { status: payload.status, recoverable: payload.recoverable === true }
 }
 
 export async function connectInvoiceWalletConnect(projectId: string) {

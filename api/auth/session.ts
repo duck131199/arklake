@@ -279,6 +279,31 @@ async function getBootstrapSession(sid: string) {
   }
 }
 
+export async function getCircleRecoverySession(cookieHeader: string | undefined) {
+  const sessionCookie = verifySessionCookie(parseCookies(cookieHeader)[cookieName])
+  if (!sessionCookie) return null
+
+  const supabase = getSupabaseClient()
+  const { data: session, error: sessionError } = await supabase
+    .from('arklake_sessions')
+    .select('sid, account_id, circle_user_token, circle_refresh_token, circle_device_id, expires_at, revoked_at')
+    .eq('sid', sessionCookie.sid)
+    .maybeSingle<StoredSession>()
+
+  if (sessionError || !session || session.revoked_at || new Date(session.expires_at).getTime() <= Date.now()) return null
+
+  const { data: wallet, error: walletError } = await supabase
+    .from('arklake_wallets')
+    .select('circle_wallet_id, address, blockchain, account_type')
+    .eq('account_id', session.account_id)
+    .eq('blockchain', 'ARC-TESTNET')
+    .eq('account_type', 'SCA')
+    .maybeSingle<StoredWallet>()
+
+  if (walletError || !wallet) return null
+  return { userToken: session.circle_user_token, walletId: wallet.circle_wallet_id }
+}
+
 async function updateCurrentSessionCircleTokens(sid: string, payload: SessionTokenRefreshPayload) {
   const { userToken, refreshToken, deviceId } = payload
   if (typeof userToken !== 'string' || typeof refreshToken !== 'string' || typeof deviceId !== 'string') {

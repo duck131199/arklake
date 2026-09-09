@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
 import SwapFlow from './SwapFlow'
-import { autoVerifyInvoicePayment, resolveCirclePaymentTxHash } from './invoice-payment-auto-confirm'
-import { bindInvoicePaymentIntent, connectInvoiceWalletConnect, createInvoicePaymentIntent, submitWalletConnectIntent, walletConnectErrorMessage, type InvoicePaymentIntent } from './walletconnect-invoice'
+import { autoVerifyInvoicePayment, CirclePaymentResolutionError, resolveCirclePaymentTxHash } from './invoice-payment-auto-confirm'
+import { bindInvoicePaymentIntent, connectInvoiceWalletConnect, createInvoicePaymentIntent, getArklakePaymentIntentStatus, submitWalletConnectIntent, walletConnectErrorMessage, type InvoicePaymentIntent } from './walletconnect-invoice'
 import type { W3SSdk as CircleW3SSdk } from '@circle-fin/w3s-pw-web-sdk'
 import { arcTestnetChainIdHex, connectExternalWallet, externalUsdcAmount, externalWalletError, readExternalUsdcBalance, submitExternalUsdcPayment, switchExternalWalletToArc, type ExternalWalletProvider } from './external-wallet'
 
@@ -2821,7 +2821,8 @@ function PublicInvoicePage({ invoiceId, sessionStatus, wallet, balances, circleA
   const prepareArklakePayment = async () => {
     setPaymentOption('arklake')
     setPaymentError('')
-    setArklakePaymentIntent(null)
+    const storedAttempt = loadArklakePaymentAttempt(invoiceId)
+    setArklakePaymentIntent(storedAttempt)
     if (sessionStatus === 'checking') return
     if (sessionStatus !== 'authenticated') {
       savePendingInvoicePayment(invoiceId)
@@ -2831,10 +2832,7 @@ function PublicInvoicePage({ invoiceId, sessionStatus, wallet, balances, circleA
 
     setPaymentStatus('loading')
     try {
-      const [response, intent] = await Promise.all([
-        fetch(`/api/invoice-payment-target?id=${encodeURIComponent(invoiceId)}`, { credentials: 'include' }),
-        createInvoicePaymentIntent(invoiceId),
-      ])
+      const response = await fetch(`/api/invoice-payment-target?id=${encodeURIComponent(invoiceId)}`, { credentials: 'include' })
       const payload = await response.json().catch(() => null) as { target?: InvoicePaymentTarget; error?: string } | null
       if (!response.ok || !payload?.target) throw new Error(payload?.error || 'Payment details could not be loaded.')
       const target = payload.target
@@ -2844,9 +2842,29 @@ function PublicInvoicePage({ invoiceId, sessionStatus, wallet, balances, circleA
       if (!usdcBalance || !isCanonicalArcTestnetUsdc(usdcBalance)) throw new Error('Canonical Arc Testnet USDC balance was not found.')
       const balanceError = getSendAmountError(target.amount, usdcBalance.amount)
       if (balanceError) throw new Error(balanceError === 'Amount exceeds available USDC balance.' ? `Insufficient USDC balance. Available: ${usdcBalance.amount} USDC.` : balanceError)
+      let intent = storedAttempt
+      let attemptStatus = 'created'
+      if (intent) {
+        const current = await getArklakePaymentIntentStatus(intent)
+        attemptStatus = current.status
+        if (attemptStatus === 'failed' || attemptStatus === 'expired') {
+          clearArklakePaymentAttempt(invoiceId)
+          intent = null
+        }
+      }
+      if (!intent) {
+        intent = await createInvoicePaymentIntent(invoiceId, fetch, 'arklake')
+        saveArklakePaymentAttempt(intent)
+        attemptStatus = 'created'
+      }
       setPaymentTarget(target)
       setArklakePaymentIntent(intent)
-      setPaymentStatus('review')
+      if (attemptStatus !== 'created') {
+        setPaymentStatus('submitted')
+        void confirmArklakePayment(intent).catch((confirmationError) => handleArklakeConfirmationError(confirmationError))
+      } else {
+        setPaymentStatus('review')
+      }
       clearPendingInvoicePayment()
     } catch (targetError) {
       setPaymentTarget(null)
@@ -2857,29 +2875,39 @@ function PublicInvoicePage({ invoiceId, sessionStatus, wallet, balances, circleA
 
   useEffect(() => {
     const pending = loadPendingInvoicePayment()
-    if (pending?.invoiceId === invoiceId && sessionStatus === 'authenticated' && invoice?.status === 'active') void prepareArklakePayment()
+    const recoverableAttempt = loadArklakePaymentAttempt(invoiceId)
+    if ((pending?.invoiceId === invoiceId || recoverableAttempt) && sessionStatus === 'authenticated' && invoice?.status === 'active') void prepareArklakePayment()
   }, [invoice?.status, invoiceId, sessionStatus])
 
-  const confirmArklakePayment = async (submittedHash = '') => {
-    if (!circleAuth || !wallet || !arklakePaymentIntent) throw new Error('Your payment session is not available.')
+  const confirmArklakePayment = async (intent: InvoicePaymentIntent, submittedHash = '') => {
     const resolvedHash = /^0x[0-9a-fA-F]{64}$/.test(submittedHash) ? submittedHash : await resolveCirclePaymentTxHash({
-      endpoint: arklakeCircleWalletEndpoint, userToken: circleAuth.userToken, walletId: wallet.id, invoiceId,
+      endpoint: arklakeCircleWalletEndpoint, intentId: intent.id, intentToken: intent.token,
     })
     setPaymentTxHash(resolvedHash)
     setPaymentStatus('verifying')
-    await bindInvoicePaymentIntent(arklakePaymentIntent, resolvedHash)
-    await autoVerifyInvoicePayment({ invoiceId, txHash: resolvedHash, intentId: arklakePaymentIntent.id, intentToken: arklakePaymentIntent.token })
+    await bindInvoicePaymentIntent(intent, resolvedHash)
+    await autoVerifyInvoicePayment({ invoiceId, txHash: resolvedHash, intentId: intent.id, intentToken: intent.token })
     await loadInvoice()
+    clearArklakePaymentAttempt(invoiceId)
+  }
+
+  const handleArklakeConfirmationError = (confirmationError: unknown) => {
+    if (confirmationError instanceof CirclePaymentResolutionError && confirmationError.retryAllowed) {
+      clearArklakePaymentAttempt(invoiceId)
+      setArklakePaymentIntent(null)
+      setPaymentStatus('idle')
+    } else setPaymentStatus('submitted')
+    setPaymentError(confirmationError instanceof Error ? confirmationError.message : 'Payment could not be confirmed.')
   }
 
   const retryArklakeConfirmation = async () => {
+    if (!arklakePaymentIntent) return
     setPaymentError('')
     setPaymentStatus('verifying')
     try {
-      await confirmArklakePayment(paymentTxHash)
+      await confirmArklakePayment(arklakePaymentIntent, paymentTxHash)
     } catch (confirmationError) {
-      setPaymentStatus('submitted')
-      setPaymentError(confirmationError instanceof Error ? confirmationError.message : 'Payment could not be confirmed.')
+      handleArklakeConfirmationError(confirmationError)
     }
   }
 
@@ -2901,11 +2929,12 @@ function PublicInvoicePage({ invoiceId, sessionStatus, wallet, balances, circleA
       const response = await fetch(arklakeCircleWalletEndpoint, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
           action: 'createTransferTransaction', userToken: circleAuth.userToken, walletId: wallet.id,
-          destinationAddress: paymentTarget.recipientAddress, amount: paymentTarget.amount, referenceId: invoiceId,
+          destinationAddress: paymentTarget.recipientAddress, amount: paymentTarget.amount,
+          intentId: arklakePaymentIntent?.id, intentToken: arklakePaymentIntent?.token,
         }),
       })
-      const data = await response.json() as { challengeId?: string; error?: string }
-      if (!response.ok || !data.challengeId) throw new Error(data.error || `Circle transfer preparation failed (${response.status}).`)
+      const data = await response.json() as { challengeId?: string; retryAllowed?: boolean; error?: string }
+      if (!response.ok || !data.challengeId) throw new CirclePaymentResolutionError(data.error || `Circle transfer preparation failed (${response.status}).`, data.retryAllowed === true)
       const circleSdkModule = await import('@circle-fin/w3s-pw-web-sdk')
       const sdk = new circleSdkModule.W3SSdk({ appSettings: { appId: circleAppId } })
       sdk.setAuthentication({ userToken: circleAuth.userToken, encryptionKey: circleAuth.encryptionKey })
@@ -2918,7 +2947,8 @@ function PublicInvoicePage({ invoiceId, sessionStatus, wallet, balances, circleA
       })
       submitted = true
       setPaymentStatus('submitted')
-      await confirmArklakePayment(txHash)
+      if (!arklakePaymentIntent) throw new Error('Your payment session is not available.')
+      await confirmArklakePayment(arklakePaymentIntent, txHash)
       const balanceResponse = await fetch(arklakeCircleWalletEndpoint, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'listBalances', userToken: circleAuth.userToken, walletId: wallet.id }),
       })
@@ -2927,7 +2957,11 @@ function PublicInvoicePage({ invoiceId, sessionStatus, wallet, balances, circleA
         if (Array.isArray(balanceData.tokenBalances)) onBalancesRefresh(balanceData.tokenBalances.map(normalizeCircleTokenBalance))
       }
     } catch (submitError) {
-      setPaymentStatus(submitted ? 'submitted' : 'review')
+      if (submitError instanceof CirclePaymentResolutionError && submitError.retryAllowed) {
+        clearArklakePaymentAttempt(invoiceId)
+        setArklakePaymentIntent(null)
+        setPaymentStatus('idle')
+      } else setPaymentStatus(submitted || arklakePaymentIntent ? 'submitted' : 'review')
       setPaymentError(submitError instanceof Error ? submitError.message : 'Payment could not be submitted.')
     }
   }
@@ -4060,6 +4094,7 @@ const arcTestnetCanonicalUsdcAddress = '0x36000000000000000000000000000000000000
 const pendingSendDraftStorageKey = 'arklake_pending_send_draft_v1'
 const pendingSendDraftTtlMs = 10 * 60 * 1000
 const pendingInvoicePaymentStorageKey = 'arklake_pending_invoice_payment_v1'
+const arklakePaymentAttemptStorageKey = (invoiceId: string) => `arklake_invoice_payment_attempt_v1:${invoiceId}`
 
 type CircleAuthStep = 'email' | 'otp' | 'verified'
 type CircleAuthStatus = 'idle' | 'initializing' | 'sending' | 'verifying' | 'checkingWallet' | 'initializingWallet'
@@ -4272,6 +4307,33 @@ function loadPendingInvoicePayment(): PendingInvoicePayment | null {
 
 function clearPendingInvoicePayment() {
   window.sessionStorage.removeItem(pendingInvoicePaymentStorageKey)
+}
+
+function saveArklakePaymentAttempt(intent: InvoicePaymentIntent) {
+  window.localStorage.setItem(arklakePaymentAttemptStorageKey(intent.invoiceId), JSON.stringify(intent))
+}
+
+function loadArklakePaymentAttempt(invoiceId: string): InvoicePaymentIntent | null {
+  try {
+    const storageKey = arklakePaymentAttemptStorageKey(invoiceId)
+    const value = window.localStorage.getItem(storageKey)
+    if (!value) return null
+    const intent = JSON.parse(value) as Partial<InvoicePaymentIntent>
+    if (intent.invoiceId !== invoiceId || typeof intent.id !== 'string' || typeof intent.token !== 'string'
+      || typeof intent.expiresAt !== 'string' || new Date(intent.expiresAt).getTime() <= Date.now()) {
+      window.localStorage.removeItem(storageKey)
+      return null
+    }
+    return intent as InvoicePaymentIntent
+  } catch {
+    window.localStorage.removeItem(arklakePaymentAttemptStorageKey(invoiceId))
+    return null
+  }
+}
+
+function clearArklakePaymentAttempt(invoiceId: string) {
+  const intent = loadArklakePaymentAttempt(invoiceId)
+  if (intent) window.localStorage.removeItem(arklakePaymentAttemptStorageKey(invoiceId))
 }
 
 function isValidEmail(value: string) {

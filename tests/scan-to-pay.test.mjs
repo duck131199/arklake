@@ -9,7 +9,7 @@ const verifyApi = readFileSync(new URL('../api/invoice-payment-verify.ts', impor
 const sql = readFileSync(new URL('../supabase/migrations/202609080002_invoice_payment_intents.sql', import.meta.url), 'utf8')
 
 test('creates an intent from the exact invoice and snapshots the immutable target', () => {
-  assert.match(client, /JSON\.stringify\(\{ action: 'create', invoiceId \}\)/)
+  assert.match(client, /JSON\.stringify\(\{ action: 'create', invoiceId, paymentRail \}\)/)
   assert.match(api, /invoice_id: invoice\.id/)
   assert.match(api, /receiving_wallet_address: invoice\.receiving_wallet_address\.toLowerCase\(\)/)
   assert.match(api, /amount: invoice\.amount/)

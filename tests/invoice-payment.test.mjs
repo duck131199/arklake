@@ -28,9 +28,9 @@ test('new payer wallet provisioning waits for the wallet instead of rejecting a 
 test('Pay with Arklake reuses Circle transfer and only the strict verifier can mark Paid', () => {
   assert.match(app, /action: 'createTransferTransaction'/)
   assert.match(app, /Approve and submit payment/)
-  assert.match(app, /await confirmArklakePayment\(txHash\)/)
-  assert.match(app, /bindInvoicePaymentIntent\(arklakePaymentIntent, resolvedHash\)/)
-  assert.match(app, /intentId: arklakePaymentIntent\.id, intentToken: arklakePaymentIntent\.token/)
+  assert.match(app, /await confirmArklakePayment\(arklakePaymentIntent, txHash\)/)
+  assert.match(app, /bindInvoicePaymentIntent\(intent, resolvedHash\)/)
+  assert.match(app, /intentId: intent\.id, intentToken: intent\.token/)
   assert.match(app, /Confirming payment/)
   assert.doesNotMatch(app, /fetch\([^\n]+invoice[^\n]+method:\s*['"](?:PATCH|PUT)/)
 })

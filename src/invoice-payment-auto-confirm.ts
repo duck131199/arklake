@@ -3,11 +3,18 @@ export type PaymentFetch = typeof fetch
 const validTxHash = (value: unknown): value is string => typeof value === 'string' && /^0x[0-9a-fA-F]{64}$/.test(value)
 const wait = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds))
 
+export class CirclePaymentResolutionError extends Error {
+  retryAllowed: boolean
+  constructor(message: string, retryAllowed = false) {
+    super(message)
+    this.retryAllowed = retryAllowed
+  }
+}
+
 export async function resolveCirclePaymentTxHash(input: {
   endpoint: string
-  userToken: string
-  walletId: string
-  invoiceId: string
+  intentId: string
+  intentToken: string
   fetcher?: PaymentFetch
   sleep?: (milliseconds: number) => Promise<unknown>
   attempts?: number
@@ -19,14 +26,15 @@ export async function resolveCirclePaymentTxHash(input: {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     const response = await fetcher(input.endpoint, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'resolveTransferTransactionHash', userToken: input.userToken, walletId: input.walletId, referenceId: input.invoiceId }),
+      credentials: 'include',
+      body: JSON.stringify({ action: 'resolveTransferTransactionHash', intentId: input.intentId, intentToken: input.intentToken }),
     })
-    const payload = await response.json().catch(() => null) as { txHash?: string; pending?: boolean; error?: string } | null
+    const payload = await response.json().catch(() => null) as { txHash?: string; pending?: boolean; retryAllowed?: boolean; error?: string } | null
     if (response.ok && validTxHash(payload?.txHash)) return payload.txHash.toLowerCase()
-    if (!response.ok || !payload?.pending) throw new Error(payload?.error || 'Circle transaction could not be resolved.')
+    if (!response.ok || !payload?.pending) throw new CirclePaymentResolutionError(payload?.error || 'Circle transaction could not be resolved.', payload?.retryAllowed === true)
     if (attempt + 1 < attempts) await sleep(input.intervalMs || 3000)
   }
-  throw new Error('Payment was submitted, but confirmation is taking longer than expected. You can return to this invoice later.')
+  throw new CirclePaymentResolutionError('Payment was submitted, but confirmation is taking longer than expected. You can return to this invoice later.')
 }
 
 export async function autoVerifyInvoicePayment(input: {

@@ -18,6 +18,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const supabase = supabaseClient()
     if (req.method === 'POST' && body.action === 'create') {
       const invoiceId = typeof body.invoiceId === 'string' ? body.invoiceId : ''
+      const paymentRail = body.paymentRail === 'arklake' ? 'arklake' : 'generic'
       if (!uuid.test(invoiceId)) return res.status(400).json({ error: 'Invalid invoice.' })
       const now = new Date().toISOString()
       await supabase.from('invoices').update({ status: 'expired', updated_at: now }).eq('id', invoiceId).eq('status', 'active').lte('expires_at', now)
@@ -27,6 +28,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!invoice) return res.status(404).json({ error: 'Invoice not found.' })
       if (invoice.status !== 'active' || new Date(invoice.expires_at).getTime() <= Date.now()) return res.status(409).json({ error: 'This invoice is not payable.' })
       if (invoice.asset !== 'USDC') return res.status(409).json({ error: 'Scan to pay currently supports USDC invoices only.' })
+      if (paymentRail === 'arklake') {
+        const { data: existing, error: existingError } = await supabase.from('invoice_payment_intents')
+          .select('id').eq('invoice_id', invoice.id).eq('payment_rail', 'arklake')
+          .in('status', ['submitting', 'submitted', 'confirming']).limit(1)
+        if (existingError) throw existingError
+        if (existing?.length) return res.status(409).json({ error: 'A payment is already being confirmed for this invoice.', paymentInProgress: true })
+      }
       const token = randomBytes(32).toString('base64url')
       const { data: intent, error: insertError } = await supabase.from('invoice_payment_intents').insert({
         invoice_id: invoice.id,
@@ -36,6 +44,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         asset: invoice.asset,
         chain_id: invoicePaymentChainId,
         expires_at: invoice.expires_at,
+        payment_rail: paymentRail,
       }).select('id').single<{ id: string }>()
       if (insertError) throw insertError
       return res.status(201).json({ intent: {
@@ -60,6 +69,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (result?.result === 'expired') return res.status(409).json({ error: 'This payment intent has expired.' })
       if (result?.result === 'tx_reused') return res.status(409).json({ error: 'This transaction is already bound to another payment.' })
       return res.status(409).json({ error: 'This payment intent can no longer accept that transaction.' })
+    }
+
+    if (req.method === 'POST' && body.action === 'status') {
+      const intentId = typeof body.intentId === 'string' ? body.intentId : ''
+      const token = typeof body.token === 'string' ? body.token : ''
+      if (!uuid.test(intentId) || token.length < 32) return res.status(400).json({ error: 'Invalid payment intent.' })
+      const { data: intent, error } = await supabase.from('invoice_payment_intents')
+        .select('invoice_id,status,circle_challenge_id').eq('id', intentId).eq('public_token_hash', tokenHash(token))
+        .eq('payment_rail', 'arklake').maybeSingle<{ invoice_id: string; status: string; circle_challenge_id: string | null }>()
+      if (error) throw error
+      if (!intent) return res.status(404).json({ error: 'Payment intent not found.' })
+      return res.status(200).json({ invoiceId: intent.invoice_id, status: intent.status, recoverable: Boolean(intent.circle_challenge_id) })
     }
 
     res.setHeader('Allow', 'POST')
