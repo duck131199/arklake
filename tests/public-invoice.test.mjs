@@ -32,11 +32,17 @@ test('public response uses an explicit payer-safe field allowlist', () => {
   assert.doesNotMatch(source, /accountId:|account_id: invoice\.account_id/)
 })
 
-test('public UI exposes all three entry options without payment execution', () => {
+test('public UI exposes all three payment entry options', () => {
   const source = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
   assert.match(source, /Pay with Arklake/)
   assert.match(source, /Connect wallet/)
   assert.match(source, /Scan to pay/)
   assert.match(source, /currentPath\.startsWith\('\/invoice\/'\)/)
   assert.match(source, /window\.location\.origin}\/invoice\/\$\{invoice\.id}/)
+})
+
+test('public invoice logo returns an authenticated session to the app', () => {
+  const source = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
+  assert.match(source, /href=\{sessionStatus === 'authenticated' \? '\/app' : '\/'\}/)
+  assert.match(source, /onNavigate\(sessionStatus === 'authenticated' \? '\/app' : '\/'\)/)
 })

@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
 import SwapFlow from './SwapFlow'
+import { autoVerifyInvoicePayment, resolveCirclePaymentTxHash } from './invoice-payment-auto-confirm'
+import { bindInvoicePaymentIntent, connectInvoiceWalletConnect, createInvoicePaymentIntent, submitWalletConnectIntent, walletConnectErrorMessage, type InvoicePaymentIntent } from './walletconnect-invoice'
 import type { W3SSdk as CircleW3SSdk } from '@circle-fin/w3s-pw-web-sdk'
+import { arcTestnetChainIdHex, connectExternalWallet, externalUsdcAmount, externalWalletError, readExternalUsdcBalance, submitExternalUsdcPayment, switchExternalWalletToArc, type ExternalWalletProvider } from './external-wallet'
 
 const shellWidth = 'site-shell'
 
@@ -2673,6 +2676,12 @@ function AppInvoiceDetailPage({ invoice, wasJustCreated = false, onNavigate }: {
             >
               {hasCopiedPublicLink ? 'Link copied' : 'Copy public link'}
             </button>
+            <a
+              href={`/api/invoice-pdf?id=${encodeURIComponent(invoice.id)}&scope=seller&timeZone=${encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)}`}
+              className="inline-flex items-center justify-center rounded-full border border-lake-border bg-surface px-3 py-1 text-xs font-semibold text-arklake-ink shadow-sm transition hover:bg-aqua-mist/50"
+            >
+              Download invoice
+            </a>
           </div>
         </div>
 
@@ -2747,11 +2756,37 @@ type PublicInvoiceRecord = {
 
 type PublicPaymentOption = 'arklake' | 'wallet' | 'scan'
 
-function PublicInvoicePage({ invoiceId }: { invoiceId: string }) {
+type InvoicePaymentTarget = { invoiceId: string; invoiceNumber: string; amount: string; asset: string; recipientAddress: string }
+type ExternalWalletState = { provider: ExternalWalletProvider; address: string; chainId: string; balance: string; rawBalance: bigint }
+
+function PublicInvoicePage({ invoiceId, sessionStatus, wallet, balances, circleAuth, email, onNavigate, onBalancesRefresh, onCircleAuthRefresh }: {
+  invoiceId: string
+  sessionStatus: 'checking' | 'authenticated' | 'anonymous'
+  wallet: ArklakeWalletIdentity | null
+  balances: ArklakeTokenBalance[]
+  circleAuth: CircleAuthContext | null
+  email: string
+  onNavigate: (path: string) => void
+  onBalancesRefresh: (balances: ArklakeTokenBalance[]) => void
+  onCircleAuthRefresh: (circleAuth: CircleSessionRefresh) => Promise<boolean>
+}) {
   const [invoice, setInvoice] = useState<PublicInvoiceRecord | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'not-found' | 'error'>('loading')
   const [error, setError] = useState('')
   const [paymentOption, setPaymentOption] = useState<PublicPaymentOption | null>(null)
+  const [paymentTarget, setPaymentTarget] = useState<InvoicePaymentTarget | null>(null)
+  const [paymentStatus, setPaymentStatus] = useState<'idle' | 'loading' | 'review' | 'signing' | 'submitting' | 'submitted' | 'verifying'>('idle')
+  const [paymentError, setPaymentError] = useState('')
+  const [paymentTxHash, setPaymentTxHash] = useState('')
+  const [arklakePaymentIntent, setArklakePaymentIntent] = useState<InvoicePaymentIntent | null>(null)
+  const [externalWallet, setExternalWallet] = useState<ExternalWalletState | null>(null)
+  const [externalStatus, setExternalStatus] = useState<'idle' | 'connecting' | 'wrong-network' | 'review' | 'submitting' | 'submitted' | 'verifying'>('idle')
+  const [externalError, setExternalError] = useState('')
+  const [externalPaymentIntent, setExternalPaymentIntent] = useState<InvoicePaymentIntent | null>(null)
+  const [scanIntent, setScanIntent] = useState<InvoicePaymentIntent | null>(null)
+  const [scanStatus, setScanStatus] = useState<'idle' | 'loading' | 'connecting' | 'submitting' | 'verifying' | 'submitted' | 'error'>('idle')
+  const [scanError, setScanError] = useState('')
+  const [scanTxHash, setScanTxHash] = useState('')
 
   const loadInvoice = async () => {
     setStatus('loading')
@@ -2776,16 +2811,289 @@ function PublicInvoicePage({ invoiceId }: { invoiceId: string }) {
   useEffect(() => { void loadInvoice() }, [invoiceId])
 
   const optionCopy: Record<PublicPaymentOption, { title: string; description: string }> = {
-    arklake: { title: 'Pay with Arklake', description: 'Arklake payment will be available in the next payment step.' },
-    wallet: { title: 'Connect wallet', description: 'External wallet connection is not enabled yet.' },
-    scan: { title: 'Scan to pay', description: 'The payment QR will be added with verified payments.' },
+    arklake: { title: 'Pay with Arklake', description: 'Use your Arklake USDC balance.' },
+    wallet: { title: 'Connect wallet', description: 'Pay with an injected EVM wallet on Arc Testnet.' },
+    scan: { title: 'Scan to pay', description: 'Scan a fixed Arc Testnet USDC payment request.' },
+  }
+
+  const prepareArklakePayment = async () => {
+    setPaymentOption('arklake')
+    setPaymentError('')
+    setArklakePaymentIntent(null)
+    if (sessionStatus === 'checking') return
+    if (sessionStatus !== 'authenticated') {
+      savePendingInvoicePayment(invoiceId)
+      onNavigate('/auth/sign-in')
+      return
+    }
+
+    setPaymentStatus('loading')
+    try {
+      const [response, intent] = await Promise.all([
+        fetch(`/api/invoice-payment-target?id=${encodeURIComponent(invoiceId)}`, { credentials: 'include' }),
+        createInvoicePaymentIntent(invoiceId),
+      ])
+      const payload = await response.json().catch(() => null) as { target?: InvoicePaymentTarget; error?: string } | null
+      if (!response.ok || !payload?.target) throw new Error(payload?.error || 'Payment details could not be loaded.')
+      const target = payload.target
+      if (!wallet) throw new Error('Your Arklake wallet is not ready.')
+      if (wallet.address.toLowerCase() === target.recipientAddress.toLowerCase()) throw new Error('This invoice cannot be paid from its receiving wallet.')
+      const usdcBalance = getUsdcBalance(balances)
+      if (!usdcBalance || !isCanonicalArcTestnetUsdc(usdcBalance)) throw new Error('Canonical Arc Testnet USDC balance was not found.')
+      const balanceError = getSendAmountError(target.amount, usdcBalance.amount)
+      if (balanceError) throw new Error(balanceError === 'Amount exceeds available USDC balance.' ? `Insufficient USDC balance. Available: ${usdcBalance.amount} USDC.` : balanceError)
+      setPaymentTarget(target)
+      setArklakePaymentIntent(intent)
+      setPaymentStatus('review')
+      clearPendingInvoicePayment()
+    } catch (targetError) {
+      setPaymentTarget(null)
+      setPaymentStatus('idle')
+      setPaymentError(targetError instanceof Error ? targetError.message : 'Payment details could not be loaded.')
+    }
+  }
+
+  useEffect(() => {
+    const pending = loadPendingInvoicePayment()
+    if (pending?.invoiceId === invoiceId && sessionStatus === 'authenticated' && invoice?.status === 'active') void prepareArklakePayment()
+  }, [invoice?.status, invoiceId, sessionStatus])
+
+  const confirmArklakePayment = async (submittedHash = '') => {
+    if (!circleAuth || !wallet || !arklakePaymentIntent) throw new Error('Your payment session is not available.')
+    const resolvedHash = /^0x[0-9a-fA-F]{64}$/.test(submittedHash) ? submittedHash : await resolveCirclePaymentTxHash({
+      endpoint: arklakeCircleWalletEndpoint, userToken: circleAuth.userToken, walletId: wallet.id, invoiceId,
+    })
+    setPaymentTxHash(resolvedHash)
+    setPaymentStatus('verifying')
+    await bindInvoicePaymentIntent(arklakePaymentIntent, resolvedHash)
+    await autoVerifyInvoicePayment({ invoiceId, txHash: resolvedHash, intentId: arklakePaymentIntent.id, intentToken: arklakePaymentIntent.token })
+    await loadInvoice()
+  }
+
+  const retryArklakeConfirmation = async () => {
+    setPaymentError('')
+    setPaymentStatus('verifying')
+    try {
+      await confirmArklakePayment(paymentTxHash)
+    } catch (confirmationError) {
+      setPaymentStatus('submitted')
+      setPaymentError(confirmationError instanceof Error ? confirmationError.message : 'Payment could not be confirmed.')
+    }
+  }
+
+  const submitArklakePayment = async () => {
+    if (!paymentTarget || !wallet) return
+    if (!circleAuth) {
+      setPaymentStatus('signing')
+      return
+    }
+    if (!circleAppId) {
+      setPaymentError('Circle App ID is not configured.')
+      return
+    }
+    setPaymentStatus('submitting')
+    setPaymentError('')
+    setPaymentTxHash('')
+    let submitted = false
+    try {
+      const response = await fetch(arklakeCircleWalletEndpoint, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+          action: 'createTransferTransaction', userToken: circleAuth.userToken, walletId: wallet.id,
+          destinationAddress: paymentTarget.recipientAddress, amount: paymentTarget.amount, referenceId: invoiceId,
+        }),
+      })
+      const data = await response.json() as { challengeId?: string; error?: string }
+      if (!response.ok || !data.challengeId) throw new Error(data.error || `Circle transfer preparation failed (${response.status}).`)
+      const circleSdkModule = await import('@circle-fin/w3s-pw-web-sdk')
+      const sdk = new circleSdkModule.W3SSdk({ appSettings: { appId: circleAppId } })
+      sdk.setAuthentication({ userToken: circleAuth.userToken, encryptionKey: circleAuth.encryptionKey })
+      const txHash = await new Promise<string>((resolve, reject) => {
+        sdk.execute(data.challengeId as string, (challengeError, challengeResult) => {
+          if (challengeError) return reject(new Error(challengeError.message || 'Circle payment approval failed.'))
+          if (challengeResult?.status !== 'COMPLETE') return reject(new Error('Circle payment approval did not complete.'))
+          resolve((challengeResult as { data?: { txHash?: string } }).data?.txHash || '')
+        })
+      })
+      submitted = true
+      setPaymentStatus('submitted')
+      await confirmArklakePayment(txHash)
+      const balanceResponse = await fetch(arklakeCircleWalletEndpoint, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'listBalances', userToken: circleAuth.userToken, walletId: wallet.id }),
+      })
+      if (balanceResponse.ok) {
+        const balanceData = await balanceResponse.json() as { tokenBalances?: CircleTokenBalance[] }
+        if (Array.isArray(balanceData.tokenBalances)) onBalancesRefresh(balanceData.tokenBalances.map(normalizeCircleTokenBalance))
+      }
+    } catch (submitError) {
+      setPaymentStatus(submitted ? 'submitted' : 'review')
+      setPaymentError(submitError instanceof Error ? submitError.message : 'Payment could not be submitted.')
+    }
+  }
+
+  const loadPaymentTarget = async () => {
+    const response = await fetch(`/api/invoice-payment-target?id=${encodeURIComponent(invoiceId)}`)
+    const payload = await response.json().catch(() => null) as { target?: InvoicePaymentTarget; error?: string } | null
+    if (!response.ok || !payload?.target) throw new Error(payload?.error || 'Payment details could not be loaded.')
+    if (payload.target.asset !== 'USDC') throw new Error('Connect wallet currently supports USDC invoices only.')
+    return payload.target
+  }
+
+  const prepareScanPayment = async () => {
+    setPaymentOption('scan')
+    setScanIntent(null)
+    setScanError('')
+    setScanTxHash('')
+    setScanStatus('loading')
+    let submittedHash = ''
+    let scanPhase = 'creating payment intent'
+    try {
+      const intent = await createInvoicePaymentIntent(invoiceId)
+      setScanIntent(intent)
+      setScanStatus('connecting')
+      scanPhase = 'initializing WalletConnect'
+      const provider = await connectInvoiceWalletConnect(import.meta.env.VITE_REOWN_PROJECT_ID || '')
+      setScanStatus('submitting')
+      scanPhase = 'preparing wallet transaction'
+      const submitted = await submitWalletConnectIntent({ provider, intent, onSubmitted: (txHash) => {
+        submittedHash = txHash
+        setScanTxHash(txHash)
+        setScanStatus('submitted')
+      } })
+      setScanStatus('verifying')
+      await autoVerifyInvoicePayment({ invoiceId, txHash: submitted.txHash, intentId: intent.id, intentToken: intent.token })
+      await loadInvoice()
+    } catch (scanLoadError) {
+      const detail = walletConnectErrorMessage(scanLoadError)
+      setScanStatus(submittedHash ? 'submitted' : 'error')
+      setScanError(`${scanPhase}: ${detail}`)
+    }
+  }
+
+  const retryScanConfirmation = async () => {
+    if (!scanIntent || !scanTxHash) return
+    setScanStatus('verifying')
+    setScanError('')
+    try {
+      await autoVerifyInvoicePayment({ invoiceId, txHash: scanTxHash, intentId: scanIntent.id, intentToken: scanIntent.token })
+      await loadInvoice()
+    } catch (verificationError) {
+      setScanStatus('submitted')
+      setScanError(verificationError instanceof Error ? verificationError.message : 'Payment could not be confirmed.')
+    }
+  }
+
+  const connectInvoiceWallet = async () => {
+    setPaymentOption('wallet')
+    setPaymentTarget(null)
+    setExternalPaymentIntent(null)
+    setExternalError('')
+    setPaymentTxHash('')
+    const provider = (window as Window & { ethereum?: ExternalWalletProvider }).ethereum
+    if (!provider) {
+      setExternalStatus('idle')
+      setExternalError('No compatible EVM wallet was found in this browser.')
+      return
+    }
+    setExternalStatus('connecting')
+    try {
+      const [connected, target, intent] = await Promise.all([connectExternalWallet(provider), loadPaymentTarget(), createInvoicePaymentIntent(invoiceId)])
+      if (connected.address.toLowerCase() === target.recipientAddress.toLowerCase()) throw new Error('This invoice cannot be paid from its receiving wallet.')
+      setPaymentTarget(target)
+      setExternalPaymentIntent(intent)
+      if (connected.chainId !== arcTestnetChainIdHex) {
+        setExternalWallet({ provider, address: connected.address, chainId: connected.chainId, balance: '0', rawBalance: 0n })
+        setExternalStatus('wrong-network')
+        return
+      }
+      const balance = await readExternalUsdcBalance(provider, connected.address)
+      setExternalWallet({ provider, address: connected.address, chainId: connected.chainId, balance: balance.amount, rawBalance: balance.raw })
+      setExternalStatus('review')
+      if (balance.raw < externalUsdcAmount(target.amount)) setExternalError(`Insufficient USDC balance. Available: ${balance.amount} USDC.`)
+    } catch (connectError) {
+      setExternalWallet(null)
+      setExternalStatus('idle')
+      setExternalError(externalWalletError(connectError, 'Unable to connect this wallet.', 'Wallet connection was rejected.'))
+    }
+  }
+
+  const switchInvoiceWalletNetwork = async () => {
+    if (!externalWallet) return
+    setExternalError('')
+    try {
+      await switchExternalWalletToArc(externalWallet.provider)
+      const chainId = await externalWallet.provider.request({ method: 'eth_chainId' })
+      if (typeof chainId !== 'string' || chainId.toLowerCase() !== arcTestnetChainIdHex) throw new Error('Your wallet did not switch to Arc Testnet.')
+      const balance = await readExternalUsdcBalance(externalWallet.provider, externalWallet.address)
+      setExternalWallet({ ...externalWallet, chainId: chainId.toLowerCase(), balance: balance.amount, rawBalance: balance.raw })
+      setExternalStatus('review')
+      if (paymentTarget && balance.raw < externalUsdcAmount(paymentTarget.amount)) setExternalError(`Insufficient USDC balance. Available: ${balance.amount} USDC.`)
+    } catch (switchError) {
+      setExternalStatus('wrong-network')
+      setExternalError(externalWalletError(switchError, 'Unable to switch to Arc Testnet.', 'Network switch was rejected.'))
+    }
+  }
+
+  const submitInvoiceWalletPayment = async () => {
+    if (!externalWallet || !paymentTarget || !externalPaymentIntent || externalStatus !== 'review') return
+    if (externalWallet.chainId !== arcTestnetChainIdHex) {
+      setExternalStatus('wrong-network')
+      setExternalError('Switch to Arc Testnet before submitting payment.')
+      return
+    }
+    if (externalWallet.rawBalance < externalUsdcAmount(paymentTarget.amount)) {
+      setExternalError(`Insufficient USDC balance. Available: ${externalWallet.balance} USDC.`)
+      return
+    }
+    setExternalStatus('submitting')
+    setExternalError('')
+    let submitted = false
+    try {
+      const currentBalance = await readExternalUsdcBalance(externalWallet.provider, externalWallet.address)
+      if (currentBalance.raw < externalUsdcAmount(paymentTarget.amount)) {
+        setExternalWallet({ ...externalWallet, balance: currentBalance.amount, rawBalance: currentBalance.raw })
+        throw new Error(`Insufficient USDC balance. Available: ${currentBalance.amount} USDC.`)
+      }
+      const hash = await submitExternalUsdcPayment(externalWallet.provider, externalWallet.address, paymentTarget.recipientAddress, paymentTarget.amount)
+      submitted = true
+      setPaymentTxHash(hash)
+      setExternalStatus('submitted')
+      setExternalStatus('verifying')
+      await bindInvoicePaymentIntent(externalPaymentIntent, hash)
+      await autoVerifyInvoicePayment({ invoiceId, txHash: hash, intentId: externalPaymentIntent.id, intentToken: externalPaymentIntent.token })
+      await loadInvoice()
+    } catch (submitError) {
+      setExternalStatus(submitted ? 'submitted' : 'review')
+      setExternalError(externalWalletError(submitError, 'Transaction could not be submitted.', 'Transaction was rejected in your wallet.'))
+    }
+  }
+
+  const retryExternalConfirmation = async () => {
+    if (!paymentTxHash || !externalPaymentIntent) return
+    setExternalError('')
+    setExternalStatus('verifying')
+    try {
+      await autoVerifyInvoicePayment({ invoiceId, txHash: paymentTxHash, intentId: externalPaymentIntent.id, intentToken: externalPaymentIntent.token })
+      await loadInvoice()
+    } catch (confirmationError) {
+      setExternalStatus('submitted')
+      setExternalError(confirmationError instanceof Error ? confirmationError.message : 'Payment could not be confirmed.')
+    }
   }
 
   return (
     <main className="min-h-screen bg-lake-canvas text-arklake-ink">
       <header className="border-b border-lake-border bg-surface/90 backdrop-blur-xl">
         <div className={`${shellWidth} flex items-center justify-between py-5`}>
-          <a href="/" aria-label="Arklake home"><ProductMark /></a>
+          <a
+            href={sessionStatus === 'authenticated' ? '/app' : '/'}
+            aria-label="Arklake home"
+            onClick={(event) => {
+              event.preventDefault()
+              onNavigate(sessionStatus === 'authenticated' ? '/app' : '/')
+            }}
+          >
+            <ProductMark />
+          </a>
           <span className="rounded-full border border-lake-border bg-lake-canvas px-3 py-1.5 text-xs font-semibold text-slate">Secure invoice</span>
         </div>
       </header>
@@ -2818,6 +3126,9 @@ function PublicInvoicePage({ invoiceId }: { invoiceId: string }) {
             </div>
 
             <div className="p-6 sm:p-8">
+              <div className="mb-5 flex justify-end">
+                <a href={`/api/invoice-pdf?id=${encodeURIComponent(invoice.id)}&timeZone=${encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)}`} className="inline-flex items-center justify-center rounded-full border border-lake-border bg-surface px-4 py-2 text-sm font-semibold text-arklake-ink shadow-sm transition hover:bg-aqua-mist/50">Download invoice</a>
+              </div>
               <div className="grid gap-4 rounded-[1.5rem] border border-lake-border bg-lake-canvas p-5 sm:grid-cols-2">
                 <div><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate">Memo</p><p className="mt-2 text-sm font-semibold">{invoice.memo || '—'}</p></div>
                 <div><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate">Created</p><p className="mt-2 text-sm font-semibold">{formatInvoiceDateTime(new Date(invoice.createdAt))}</p></div>
@@ -2840,17 +3151,84 @@ function PublicInvoicePage({ invoiceId }: { invoiceId: string }) {
                       ['wallet', 'Connect wallet', 'Use an external wallet'],
                       ['scan', 'Scan to pay', 'Pay from another device'],
                     ] as const).map(([value, title, description]) => (
-                      <button key={value} type="button" className={`rounded-[1.35rem] border p-4 text-left transition ${paymentOption === value ? 'border-arklake-aqua bg-aqua-mist/60 ring-4 ring-arklake-aqua/10' : 'border-lake-border bg-surface hover:bg-lake-canvas'}`} onClick={() => setPaymentOption(value)}>
+                      <button key={value} type="button" disabled={value === 'arklake' && sessionStatus === 'checking'} className={`rounded-[1.35rem] border p-4 text-left transition disabled:cursor-wait disabled:opacity-60 ${paymentOption === value ? 'border-arklake-aqua bg-aqua-mist/60 ring-4 ring-arklake-aqua/10' : 'border-lake-border bg-surface hover:bg-lake-canvas'}`} onClick={() => value === 'arklake' ? void prepareArklakePayment() : value === 'wallet' ? void connectInvoiceWallet() : void prepareScanPayment()}>
                         <span className="block text-sm font-semibold">{title}</span>
                         <span className="mt-2 block text-xs leading-5 text-slate">{description}</span>
                       </button>
                     ))}
                   </div>
-                  {paymentOption ? (
+                  {paymentOption === 'arklake' ? (
                     <div className="mt-4 rounded-[1.35rem] border border-aqua-mist bg-aqua-mist/40 p-4">
-                      <p className="text-sm font-semibold">{optionCopy[paymentOption].title}</p>
-                      <p className="mt-1 text-sm leading-6 text-slate">{optionCopy[paymentOption].description}</p>
-                      <p className="mt-2 text-xs font-medium text-slate">Target: {invoice.invoiceNumber} · {invoice.amount} {invoice.asset}</p>
+                      {paymentStatus === 'loading' || sessionStatus === 'checking' ? <p className="text-sm font-semibold">Checking your Arklake wallet…</p> : null}
+                      {paymentTarget && (paymentStatus === 'review' || paymentStatus === 'signing' || paymentStatus === 'submitting' || paymentStatus === 'submitted' || paymentStatus === 'verifying') ? (
+                        <div className="space-y-3">
+                          <p className="text-sm font-semibold">{paymentStatus === 'verifying' ? 'Confirming payment' : paymentStatus === 'submitted' ? 'Payment submitted' : 'Review payment'}</p>
+                          <ReviewInvoiceRow label="Invoice">{paymentTarget.invoiceNumber}</ReviewInvoiceRow>
+                          <ReviewInvoiceRow label="Amount">{paymentTarget.amount} {paymentTarget.asset}</ReviewInvoiceRow>
+                          <ReviewInvoiceRow label="Seller">{invoice.seller}</ReviewInvoiceRow>
+                          <ReviewInvoiceRow label="Recipient"><span className="break-all">{paymentTarget.recipientAddress}</span></ReviewInvoiceRow>
+                          {paymentStatus === 'submitted' || paymentStatus === 'verifying' ? (
+                            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
+                              {paymentStatus === 'verifying' ? 'The transaction was submitted. Waiting for on-chain confirmation…' : 'The transaction was submitted, but confirmation is not complete yet.'}
+                            </div>
+                          ) : paymentStatus === 'signing' ? (
+                            <CircleSigningReauthPanel email={email} title="Wallet approval needed" onComplete={async (nextCircleAuth) => {
+                              const refreshed = await onCircleAuthRefresh(nextCircleAuth)
+                              if (!refreshed) return false
+                              setPaymentStatus('review')
+                              return true
+                            }} />
+                          ) : (
+                            <button type="button" disabled={paymentStatus === 'submitting'} className="w-full rounded-full bg-arklake-ink px-5 py-3 text-sm font-semibold text-white disabled:opacity-60" onClick={() => void submitArklakePayment()}>
+                              {paymentStatus === 'submitting' ? 'Waiting for Circle approval…' : 'Approve and submit payment'}
+                            </button>
+                          )}
+                          {paymentStatus === 'submitted' && paymentError ? <button type="button" className="w-full rounded-full border border-lake-border bg-surface px-5 py-3 text-sm font-semibold" onClick={() => void retryArklakeConfirmation()}>Check payment status</button> : null}
+                          {paymentTxHash ? <a className="block break-all text-sm font-semibold text-arklake-aqua" href={`https://testnet.arcscan.app/tx/${paymentTxHash}`} target="_blank" rel="noreferrer">View transaction on Arcscan</a> : null}
+                        </div>
+                      ) : null}
+                      {paymentError ? <p className="text-sm font-semibold text-red-700">{paymentError}</p> : null}
+                    </div>
+                  ) : paymentOption === 'wallet' ? (
+                    <div className="mt-4 rounded-[1.35rem] border border-aqua-mist bg-aqua-mist/40 p-4">
+                      <p className="text-sm font-semibold">{externalStatus === 'verifying' ? 'Confirming payment' : externalStatus === 'submitted' ? 'Payment submitted' : externalStatus === 'review' || externalStatus === 'submitting' ? 'Review payment' : 'Connect wallet'}</p>
+                      {externalStatus === 'connecting' ? <p className="mt-2 text-sm text-slate">Waiting for your wallet…</p> : null}
+                      {externalWallet ? <div className="mt-3 space-y-3">
+                        {paymentTarget ? <>
+                          <ReviewInvoiceRow label="Invoice">{paymentTarget.invoiceNumber}</ReviewInvoiceRow>
+                          <ReviewInvoiceRow label="Amount">{paymentTarget.amount} {paymentTarget.asset}</ReviewInvoiceRow>
+                        </> : null}
+                        <ReviewInvoiceRow label="Payer wallet"><span className="break-all">{externalWallet.address}</span></ReviewInvoiceRow>
+                        {paymentTarget ? <ReviewInvoiceRow label="Receiving wallet"><span className="break-all">{paymentTarget.recipientAddress}</span></ReviewInvoiceRow> : null}
+                        <ReviewInvoiceRow label="Network">{externalWallet.chainId === arcTestnetChainIdHex ? 'Arc Testnet' : `Unsupported network (${externalWallet.chainId || 'unknown'})`}</ReviewInvoiceRow>
+                        {externalWallet.chainId === arcTestnetChainIdHex ? <ReviewInvoiceRow label="USDC balance">{externalWallet.balance} USDC</ReviewInvoiceRow> : null}
+                        {externalStatus === 'wrong-network' ? <button type="button" className="w-full rounded-full bg-arklake-ink px-5 py-3 text-sm font-semibold text-white" onClick={() => void switchInvoiceWalletNetwork()}>Switch to Arc Testnet</button> : null}
+                        {externalStatus === 'review' && paymentTarget ? <button type="button" className="w-full rounded-full bg-arklake-ink px-5 py-3 text-sm font-semibold text-white disabled:opacity-60" disabled={externalWallet.rawBalance < externalUsdcAmount(paymentTarget.amount)} onClick={() => void submitInvoiceWalletPayment()}>Approve and submit payment</button> : null}
+                        {externalStatus === 'submitting' ? <p className="text-sm font-semibold text-slate">Waiting for wallet approval…</p> : null}
+                        {externalStatus === 'submitted' || externalStatus === 'verifying' ? <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">{externalStatus === 'verifying' ? 'The transaction was submitted. Waiting for on-chain confirmation…' : 'The transaction was submitted, but confirmation is not complete yet.'}</div> : null}
+                        {externalStatus === 'submitted' && externalError ? <button type="button" className="w-full rounded-full border border-lake-border bg-surface px-5 py-3 text-sm font-semibold" onClick={() => void retryExternalConfirmation()}>Check payment status</button> : null}
+                        {paymentTxHash ? <a className="block break-all text-sm font-semibold text-arklake-aqua" href={`https://testnet.arcscan.app/tx/${paymentTxHash}`} target="_blank" rel="noreferrer">View transaction on Arcscan</a> : null}
+                      </div> : null}
+                      {externalStatus === 'idle' ? <button type="button" className="mt-3 rounded-full bg-arklake-ink px-5 py-2.5 text-sm font-semibold text-white" onClick={() => void connectInvoiceWallet()}>Connect wallet</button> : null}
+                      {externalError ? <p className="mt-3 text-sm font-semibold text-red-700">{externalError}</p> : null}
+                    </div>
+                  ) : paymentOption === 'scan' ? (
+                    <div className="mt-4 rounded-[1.35rem] border border-aqua-mist bg-aqua-mist/40 p-4">
+                      <p className="text-sm font-semibold">{scanStatus === 'verifying' ? 'Confirming payment' : scanStatus === 'submitted' ? 'Payment submitted' : 'Scan to pay'}</p>
+                      {scanStatus === 'loading' ? <p className="mt-2 text-sm text-slate">Creating a secure payment intent…</p> : null}
+                      {scanStatus === 'connecting' ? <p className="mt-2 text-sm text-slate">Scan the WalletConnect QR with your mobile wallet, then approve the connection.</p> : null}
+                      {scanStatus === 'submitting' ? <p className="mt-2 text-sm text-slate">Confirm the fixed USDC transfer in your wallet.</p> : null}
+                      {scanIntent ? <div className="mt-4 space-y-3">
+                        <ReviewInvoiceRow label="Invoice">{scanIntent.invoiceNumber}</ReviewInvoiceRow>
+                        <ReviewInvoiceRow label="Amount">{scanIntent.amount} {scanIntent.asset}</ReviewInvoiceRow>
+                        <ReviewInvoiceRow label="Receiving wallet"><span className="break-all">{scanIntent.recipientAddress}</span></ReviewInvoiceRow>
+                        <ReviewInvoiceRow label="Network">Arc Testnet</ReviewInvoiceRow>
+                      </div> : null}
+                      {scanStatus === 'verifying' ? <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">The transaction was submitted. Waiting for strict on-chain verification…</div> : null}
+                      {scanStatus === 'submitted' && scanError ? <button type="button" className="mt-4 w-full rounded-full border border-lake-border bg-surface px-5 py-3 text-sm font-semibold" onClick={() => void retryScanConfirmation()}>Check payment status</button> : null}
+                      {scanTxHash ? <a className="mt-4 block break-all text-sm font-semibold text-arklake-aqua" href={`https://testnet.arcscan.app/tx/${scanTxHash}`} target="_blank" rel="noreferrer">View transaction on Arcscan</a> : null}
+                      {scanStatus === 'error' && scanError ? <p className="mt-3 text-sm font-semibold text-red-700">{scanError}</p> : null}
+                      {scanStatus === 'submitted' && scanError ? <p className="mt-3 text-sm font-semibold text-red-700">{scanError}</p> : null}
                     </div>
                   ) : null}
                 </div>
@@ -3678,6 +4056,7 @@ const arklakeWalletAccountType = 'SCA'
 const arcTestnetCanonicalUsdcAddress = '0x3600000000000000000000000000000000000000'
 const pendingSendDraftStorageKey = 'arklake_pending_send_draft_v1'
 const pendingSendDraftTtlMs = 10 * 60 * 1000
+const pendingInvoicePaymentStorageKey = 'arklake_pending_invoice_payment_v1'
 
 type CircleAuthStep = 'email' | 'otp' | 'verified'
 type CircleAuthStatus = 'idle' | 'initializing' | 'sending' | 'verifying' | 'checkingWallet' | 'initializingWallet'
@@ -3701,6 +4080,12 @@ type PendingSendDraft = {
   origin: 'home' | 'wallet'
   recipient: string
   amount: string
+  expiresAt: number
+}
+
+type PendingInvoicePayment = {
+  action: 'pay-invoice'
+  invoiceId: string
   expiresAt: number
 }
 
@@ -3858,6 +4243,32 @@ function loadPendingSendDraft(): PendingSendDraft | null {
 
 function clearPendingSendDraft() {
   window.sessionStorage.removeItem(pendingSendDraftStorageKey)
+}
+
+function savePendingInvoicePayment(invoiceId: string) {
+  window.sessionStorage.setItem(pendingInvoicePaymentStorageKey, JSON.stringify({
+    action: 'pay-invoice', invoiceId, expiresAt: Date.now() + pendingSendDraftTtlMs,
+  } satisfies PendingInvoicePayment))
+}
+
+function loadPendingInvoicePayment(): PendingInvoicePayment | null {
+  try {
+    const value = window.sessionStorage.getItem(pendingInvoicePaymentStorageKey)
+    if (!value) return null
+    const draft = JSON.parse(value) as Partial<PendingInvoicePayment>
+    if (draft.action !== 'pay-invoice' || typeof draft.invoiceId !== 'string' || typeof draft.expiresAt !== 'number' || draft.expiresAt <= Date.now()) {
+      window.sessionStorage.removeItem(pendingInvoicePaymentStorageKey)
+      return null
+    }
+    return draft as PendingInvoicePayment
+  } catch {
+    window.sessionStorage.removeItem(pendingInvoicePaymentStorageKey)
+    return null
+  }
+}
+
+function clearPendingInvoicePayment() {
+  window.sessionStorage.removeItem(pendingInvoicePaymentStorageKey)
 }
 
 function isValidEmail(value: string) {
@@ -4212,19 +4623,18 @@ function AuthPage({ onSignedIn }: { onSignedIn: (wallet: ArklakeWalletIdentity, 
           return
         }
 
-        if (challengeResult?.status !== 'COMPLETE') {
-          reject(new Error('Circle wallet challenge did not complete.'))
-          return
-        }
-
         resolve()
       })
     })
 
     setStatus('checkingWallet')
 
-    const updatedWallet = (await listArklakeWallets(result.userToken)).find(isArklakeWallet)
-    if (!updatedWallet) throw new Error('Circle wallet was not found after initialization.')
+    let updatedWallet: CircleWallet | undefined
+    for (let attempt = 0; attempt < 6 && !updatedWallet; attempt += 1) {
+      if (attempt > 0) await new Promise((resolve) => window.setTimeout(resolve, 1000))
+      updatedWallet = (await listArklakeWallets(result.userToken)).find(isArklakeWallet)
+    }
+    if (!updatedWallet) throw new Error('Circle wallet provisioning is still in progress. Please continue in a moment.')
 
     return getArklakeWalletIdentity(updatedWallet)
   }
@@ -4539,6 +4949,10 @@ export default function App() {
   }, [sessionStatus])
 
   useEffect(() => {
+    if (sessionStatus === 'authenticated' && currentPath.startsWith('/app/invoices')) void loadInvoices()
+  }, [currentPath])
+
+  useEffect(() => {
     const handlePopState = () => setCurrentPath(window.location.pathname)
     window.addEventListener('popstate', handlePopState)
 
@@ -4579,12 +4993,13 @@ export default function App() {
 
   const handleSignedIn = (wallet: ArklakeWalletIdentity, balances: ArklakeTokenBalance[], email: string, nextCircleAuth: CircleAuthContext) => {
     const pendingSendDraft = loadPendingSendDraft()
+    const pendingInvoicePayment = loadPendingInvoicePayment()
     setArklakeWallet(wallet)
     setArklakeBalances(balances)
     setCircleAuth(nextCircleAuth)
     setArklakeEmail(email)
     setSessionStatus('authenticated')
-    handleAppNavigate(pendingSendDraft?.origin === 'wallet' ? '/app/wallet' : '/app')
+    handleAppNavigate(pendingInvoicePayment ? `/invoice/${pendingInvoicePayment.invoiceId}` : pendingSendDraft?.origin === 'wallet' ? '/app/wallet' : '/app')
   }
 
   const handleCircleAuthRefresh = async (nextCircleAuth: CircleSessionRefresh) => {
@@ -4627,7 +5042,7 @@ export default function App() {
   const selectedInvoice = invoiceDetailId ? runtimeInvoices.find((invoice) => invoice.id === invoiceDetailId) : undefined
 
   if (publicInvoiceId) {
-    return <PublicInvoicePage invoiceId={publicInvoiceId} />
+    return <PublicInvoicePage invoiceId={publicInvoiceId} sessionStatus={sessionStatus} wallet={arklakeWallet} balances={arklakeBalances} circleAuth={circleAuth} email={arklakeEmail} onNavigate={handleAppNavigate} onBalancesRefresh={setArklakeBalances} onCircleAuthRefresh={handleCircleAuthRefresh} />
   }
 
   if (currentPath.startsWith('/app') && sessionStatus === 'checking') {
