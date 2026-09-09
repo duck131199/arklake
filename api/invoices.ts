@@ -1,6 +1,6 @@
 import crypto from 'node:crypto'
 import { createClient } from '@supabase/supabase-js'
-import { invoiceExpiresAt, validateInvoiceCreate } from './invoice-core.js'
+import { invoiceExpiresAt, validateInvoiceCreate } from '../server/invoice-core.js'
 
 type VercelRequest = { method?: string; headers: { cookie?: string }; body?: unknown; query?: { id?: string | string[] } }
 type VercelResponse = { status: (code: number) => VercelResponse; json: (body: object) => unknown; setHeader: (name: string, value: string) => void }

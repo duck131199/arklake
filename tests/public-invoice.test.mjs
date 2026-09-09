@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
 import { stripTypeScriptTypes } from 'node:module'
 
-const coreSource = stripTypeScriptTypes(readFileSync(new URL('../api/invoice-core.ts', import.meta.url), 'utf8'))
+const coreSource = stripTypeScriptTypes(readFileSync(new URL('../server/invoice-core.ts', import.meta.url), 'utf8'))
 const context = vm.createContext({ Date, Object, Number, RegExp })
 const module = new vm.SourceTextModule(coreSource, { context })
 await module.link(() => { throw new Error('Unexpected import') })

@@ -1,7 +1,7 @@
 import crypto from 'node:crypto'
 import { createClient } from '@supabase/supabase-js'
-import { createInvoicePdf, type InvoicePdfData } from './invoice-pdf-core.js'
-import { maskInvoiceEmail } from './invoice-core.js'
+import { createInvoicePdf, type InvoicePdfData } from '../server/invoice-pdf-core.js'
+import { maskInvoiceEmail } from '../server/invoice-core.js'
 
 type VercelRequest = { method?: string; headers: { cookie?: string }; query?: { id?: string | string[]; scope?: string | string[]; timeZone?: string | string[] } }
 type VercelResponse = { status: (code: number) => VercelResponse; json: (body: object) => unknown; setHeader: (name: string, value: string | number) => void; end: (body: Uint8Array) => unknown }

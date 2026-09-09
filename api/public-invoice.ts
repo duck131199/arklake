@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
-import { maskInvoiceEmail } from './invoice-core.js'
+import { maskInvoiceEmail } from '../server/invoice-core.js'
 
 type VercelRequest = { method?: string; query?: { id?: string | string[] } }
 type VercelResponse = { status: (code: number) => VercelResponse; json: (body: object) => unknown; setHeader: (name: string, value: string) => void }

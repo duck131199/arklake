@@ -29,6 +29,6 @@ export function invoiceExpiresAt(expiry: InvoiceExpiryOption, now = new Date()) 
 export function maskInvoiceEmail(value: string) {
   const [local, domain] = value.trim().toLowerCase().split('@')
   if (!local || !domain) return 'Private recipient'
-  const visible = local.length === 1 ? `${local}*` : `${local[0]}${local.length > 2 ? '…' : '*'}${local.length > 2 ? local.at(-1) : ''}`
+  const visible = local.length === 1 ? `${local}*` : `${local[0]}${local.length > 2 ? '…' : '*'}${local.length > 2 ? local[local.length - 1] : ''}`
   return `${visible}@${domain}`
 }

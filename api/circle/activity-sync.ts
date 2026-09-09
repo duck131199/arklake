@@ -1,7 +1,7 @@
 import crypto from 'node:crypto'
 import { createClient } from '@supabase/supabase-js'
-import { normalizeCircleTransactions, type CircleTransaction, type OnchainLeg, type TokenDetails } from './activity-core.js'
-import { activityEmail, notificationBelongsToAccount, notificationIdempotencyKey, transactionEmailEnabled, type EmailActivity } from './activity-email.js'
+import { normalizeCircleTransactions, type CircleTransaction, type OnchainLeg, type TokenDetails } from '../../server/circle/activity-core.js'
+import { activityEmail, notificationBelongsToAccount, notificationIdempotencyKey, transactionEmailEnabled, type EmailActivity } from '../../server/circle/activity-email.js'
 
 type VercelRequest = { method?: string; headers: { cookie?: string } }
 type VercelResponse = { status: (code: number) => VercelResponse; json: (body: object) => unknown }
@@ -234,7 +234,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     if (listed.response || !listed.transactions) return res.status(502).json({ error: 'Circle transaction history could not be loaded.' })
 
-    const ids = [...new Set(listed.transactions.map((transaction) => transaction.tokenId || transaction.token?.id).filter((id): id is string => Boolean(id)))]
+    const tokenIds = new Set<string>()
+    for (const transaction of listed.transactions) {
+      const tokenId = transaction.tokenId || transaction.token?.id
+      if (typeof tokenId === 'string' && tokenId.length > 0) tokenIds.add(tokenId)
+    }
+    const ids = [...tokenIds]
     const [lookedUpTokens, balanceTokens] = await Promise.all([tokenDetails(ids, userToken), walletTokenDetails(wallet.circle_wallet_id, userToken)])
     const tokens = new Map(lookedUpTokens)
     for (const token of balanceTokens) tokens.set(token.id, { ...tokens.get(token.id), ...token })

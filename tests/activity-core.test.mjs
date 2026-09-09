@@ -4,14 +4,14 @@ import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
 import { stripTypeScriptTypes } from 'node:module'
 
-const source = stripTypeScriptTypes(readFileSync(new URL('../api/circle/activity-core.ts', import.meta.url), 'utf8'))
+const source = stripTypeScriptTypes(readFileSync(new URL('../server/circle/activity-core.ts', import.meta.url), 'utf8'))
 const context = vm.createContext({ Date, Map, Set })
 const module = new vm.SourceTextModule(source, { context })
 await module.link(() => { throw new Error('Unexpected import') })
 await module.evaluate()
 const { normalizeCircleTransactions } = module.namespace
 
-const emailSource = stripTypeScriptTypes(readFileSync(new URL('../api/circle/activity-email.ts', import.meta.url), 'utf8'))
+const emailSource = stripTypeScriptTypes(readFileSync(new URL('../server/circle/activity-email.ts', import.meta.url), 'utf8'))
 const emailModule = new vm.SourceTextModule(emailSource, { context })
 await emailModule.link(() => { throw new Error('Unexpected import') })
 await emailModule.evaluate()

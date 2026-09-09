@@ -3,7 +3,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { SwapKit, getChainByEnum } from '@circle-fin/swap-kit'
 import { createCircleUserWalletAdapter } from '@circle-fin/adapter-circle-wallets/ucw/server'
 import { ViemAdapter } from '@circle-fin/adapter-viem-v2'
-import { createPublicClient, createWalletClient, http } from 'viem'
+import { createPublicClient, createWalletClient, http, type PublicClient } from 'viem'
 
 export const config = { maxDuration: 300 }
 const assets = ['USDC', 'EURC', 'cirBTC'] as const
@@ -65,7 +65,7 @@ export default async function handler(req: IncomingMessage & { body?: Record<str
       const address = body.walletAddress as `0x${string}`
       const arc = getChainByEnum(chain)
       const adapter = new ViemAdapter({
-        getPublicClient: ({ chain: viemChain }) => createPublicClient({ chain: viemChain, transport: http(rpc) }),
+        getPublicClient: ({ chain: viemChain }) => createPublicClient({ chain: viemChain, transport: http(rpc) }) as unknown as PublicClient,
         getWalletClient: ({ chain: viemChain }) => createWalletClient({ account: address, chain: viemChain, transport: http(rpc) }),
       }, { addressContext: 'developer-controlled', supportedChains: [arc] })
       const estimate = await kit.estimate({

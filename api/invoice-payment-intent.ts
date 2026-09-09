@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { createClient } from '@supabase/supabase-js'
-import { invoicePaymentChainId, normalizePaymentTxHash } from './invoice-payment-verify-core.js'
+import { invoicePaymentChainId, normalizePaymentTxHash } from '../server/invoice-payment-verify-core.js'
 
 type VercelRequest = { method?: string; body?: unknown; query?: Record<string, string | string[] | undefined> }
 type VercelResponse = { status: (code: number) => VercelResponse; json: (body: object) => unknown; setHeader: (name: string, value: string) => void }

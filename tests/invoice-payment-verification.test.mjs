@@ -8,7 +8,7 @@ import {
   invoiceUsdcBaseUnits,
   normalizePaymentTxHash,
   verifyInvoicePaymentReceipt,
-} from '../api/invoice-payment-verify-core.ts'
+} from '../server/invoice-payment-verify-core.ts'
 
 const recipient = '0xd94074edb1da4c98959d455172beb58e4400324f'
 const payer = '0xb1f9ee64333564050964241688899166307d446e'
