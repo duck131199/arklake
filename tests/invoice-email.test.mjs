@@ -4,13 +4,14 @@ import { readFileSync } from 'node:fs'
 import { invoiceEmailEnabled, invoiceEmailIdempotencyKey, processInvoiceEmailOutbox, renderInvoiceEmail } from '../server/invoice-email.ts'
 
 const migration = readFileSync(new URL('../supabase/migrations/202609090002_invoice_email_outbox.sql', import.meta.url), 'utf8')
+const paidSellerMigration = readFileSync(new URL('../supabase/migrations/202609100001_invoice_paid_email_seller.sql', import.meta.url), 'utf8')
 const createApi = readFileSync(new URL('../api/invoices.ts', import.meta.url), 'utf8')
 const verifyApi = readFileSync(new URL('../api/invoice-payment-verify.ts', import.meta.url), 'utf8')
 const activitySync = readFileSync(new URL('../api/circle/activity-sync.ts', import.meta.url), 'utf8')
 
 const invoice = {
   id: '11111111-1111-4111-8111-111111111111', invoice_number: 'ARK-20260909-EMAIL', account_id: '22222222-2222-4222-8222-222222222222',
-  amount: '12.5', asset: 'USDC', memo: 'Design services', status: 'active', expires_at: '2026-09-16T01:00:00Z', paid_at: null, payment_tx_hash: null,
+  payer_email: 'payer@example.com', amount: '12.5', asset: 'USDC', memo: 'Design services', status: 'active', expires_at: '2026-09-16T01:00:00Z', paid_at: null, payment_tx_hash: null,
   created_at: '2026-09-09T01:00:00Z',
 }
 
@@ -46,11 +47,30 @@ test('invoice_created is enqueued from immutable payer_email and schema prevents
 })
 
 test('invoice_paid is enqueued only inside the verified atomic Paid transition', () => {
-  const paidUpdate = migration.indexOf("set status = 'paid'")
-  const paidEnqueue = migration.indexOf("'invoice_paid', target.payer_email")
+  const paidUpdate = paidSellerMigration.indexOf("set status = 'paid'")
+  const paidEnqueue = paidSellerMigration.indexOf("'invoice_paid', seller_email")
   assert.ok(paidUpdate >= 0 && paidEnqueue > paidUpdate)
+  assert.match(paidSellerMigration, /select email into seller_email[\s\S]*from public\.arklake_accounts[\s\S]*where id = target\.account_id/)
+  assert.match(paidSellerMigration, /if position\('@' in coalesce\(seller_email, ''\)\) > 1 then[\s\S]*insert into public\.invoice_email_outbox/)
+  assert.doesNotMatch(paidSellerMigration, /'invoice_paid', target\.payer_email/)
   assert.match(verifyApi, /mark_verified_invoice_paid/)
   assert.doesNotMatch(createApi, /invoice_paid/)
+})
+
+test('missing seller email skips notification without rolling back the Paid transition', () => {
+  const paidUpdate = paidSellerMigration.indexOf("set status = 'paid'")
+  const sellerLookup = paidSellerMigration.indexOf('select email into seller_email')
+  const conditionalEnqueue = paidSellerMigration.indexOf("if position('@' in coalesce(seller_email, '')) > 1 then")
+  const paidResult = paidSellerMigration.indexOf("jsonb_build_object('result', 'paid'")
+  assert.ok(paidUpdate >= 0 && sellerLookup > paidUpdate && conditionalEnqueue > sellerLookup && paidResult > conditionalEnqueue)
+})
+
+test('the one historical failed Paid job remains recorded but cannot be retried', () => {
+  assert.match(paidSellerMigration, /invoice\.invoice_number = 'ARK-20260908-EB1FC4A3'/)
+  assert.match(paidSellerMigration, /outbox\.event_type = 'invoice_paid'/)
+  assert.match(paidSellerMigration, /outbox\.status = 'failed'/)
+  assert.match(paidSellerMigration, /next_attempt_at = 'infinity'::timestamptz/)
+  assert.doesNotMatch(paidSellerMigration, /delete from public\.invoice_email_outbox/)
 })
 
 test('claim is concurrent-safe and sent jobs are outside its candidates', async () => {
@@ -116,4 +136,28 @@ test('new invoice template is complete and its QR contains only the public invoi
   assert.ok(message.attachments?.[0].content.length > 100)
   assert.doesNotMatch(message.text, /ethereum:|transfer\?|uint256=/)
   assert.equal(invoiceEmailIdempotencyKey(invoice.id, 'invoice_created'), `invoice-email-${invoice.id}-invoice_created`)
+})
+
+test('Paid email confirms verified payment to the seller without receipt language', async () => {
+  const paidInvoice = { ...invoice, status: 'paid', paid_at: '2026-09-10T02:55:28Z', payment_tx_hash: `0x${'a'.repeat(64)}` }
+  const message = await renderInvoiceEmail('invoice_paid', paidInvoice, 'seller@example.com', 'seller@example.com', 'https://arklake.site')
+  assert.equal(message.subject, 'Payment received for ARK-20260909-EMAIL')
+  assert.match(message.text, /^Invoice paid/m)
+  assert.match(message.text, /Payment has been verified on-chain\./)
+  assert.match(message.text, /Invoice number: ARK-20260909-EMAIL/)
+  assert.match(message.text, /Paid by: payer@example\.com/)
+  assert.match(message.text, /Amount: 12\.5 USDC/)
+  assert.match(message.text, /Paid at: Sep 10, 2026 · 2:55 AM UTC/)
+  assert.match(message.text, /Payment details: USDC · Arc Testnet/)
+  assert.match(message.text, /Transaction: 0xaaaaaaaa\.\.\.aaaaaaaaa/)
+  assert.match(message.text, /View on Arcscan: https:\/\/testnet\.arcscan\.app\/tx\//)
+  assert.match(message.text, /View paid invoice: https:\/\/arklake\.site\/invoice\//)
+  assert.match(message.html, /View paid invoice/)
+  assert.match(message.html, /View on Arcscan/)
+  assert.ok(message.html.indexOf('View paid invoice') < message.html.indexOf('Transaction'))
+  assert.match(message.html, />0xaaaaaaaa\.\.\.aaaaaaaaa</)
+  assert.match(message.html, /href="https:\/\/testnet\.arcscan\.app\/tx\/0x[a-f0-9]{64}"/)
+  assert.doesNotMatch(`${message.subject}\n${message.text}\n${message.html}`, /receipt/i)
+  assert.equal(message.attachments, undefined)
+  assert.equal(invoiceEmailIdempotencyKey(invoice.id, 'invoice_paid'), `invoice-email-${invoice.id}-invoice_paid`)
 })

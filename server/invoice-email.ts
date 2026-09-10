@@ -14,6 +14,7 @@ type InvoiceEmailRecord = {
   id: string
   invoice_number: string
   account_id: string
+  payer_email: string
   amount: string | number
   asset: string
   memo: string
@@ -47,12 +48,14 @@ export function invoiceEmailIdempotencyKey(invoiceId: string, eventType: Invoice
 export async function renderInvoiceEmail(eventType: InvoiceEmailEvent, invoice: InvoiceEmailRecord, sellerEmail: string, recipientEmail: string, publicUrl: string) {
   const amount = `${invoice.amount} ${invoice.asset}`
   const isPaid = eventType === 'invoice_paid'
-  const subject = isPaid ? `Invoice ${invoice.invoice_number} has been paid` : 'You received an invoice'
+  const subject = isPaid ? `Payment received for ${invoice.invoice_number}` : 'You received an invoice'
   const headline = isPaid ? 'Invoice paid' : 'You received an invoice'
-  const supporting = isPaid ? 'Your payment has been verified.' : 'Review the details below and pay securely through Arklake.'
+  const supporting = isPaid ? 'Payment has been verified on-chain.' : 'Review the details below and pay securely through Arklake.'
   const invoiceUrl = `${publicUrl.replace(/\/$/, '')}/invoice/${encodeURIComponent(invoice.id)}`
+  const arcscanUrl = invoice.payment_tx_hash ? `https://testnet.arcscan.app/tx/${encodeURIComponent(invoice.payment_tx_hash)}` : null
+  const transactionLabel = invoice.payment_tx_hash ? `${invoice.payment_tx_hash.slice(0, 10)}...${invoice.payment_tx_hash.slice(-9)}` : ''
   const details = isPaid ? [
-    ['From', sellerEmail], ['Description', invoice.memo || '—'], ['Amount', amount],
+    ['Invoice number', invoice.invoice_number], ['Paid by', invoice.payer_email], ['Amount', amount],
     ['Paid at', displayDate(invoice.paid_at || invoice.expires_at)], ['Payment details', `${invoice.asset} · Arc Testnet`],
   ] : [
     ['From', sellerEmail], ['Bill to', recipientEmail], ['Invoice number', invoice.invoice_number],
@@ -61,8 +64,13 @@ export async function renderInvoiceEmail(eventType: InvoiceEmailEvent, invoice: 
   ]
   const rows = details.map(([label, value]) => `<tr><td style="padding:9px 0;color:#708593">${escapeHtml(label)}</td><td align="right" style="padding:9px 0;color:#102a43;font-weight:600">${escapeHtml(value)}</td></tr>`).join('')
   const qrContent = isPaid ? null : await QRCode.toBuffer(invoiceUrl, { type: 'png', width: 144, margin: 1, color: { dark: '#102a43', light: '#ffffff' } })
-  const action = isPaid ? '' : `<p style="margin:26px 0 0"><a href="${escapeHtml(invoiceUrl)}" style="display:inline-block;border-radius:999px;background:#102a43;padding:13px 22px;color:#fff;font-size:14px;font-weight:700;text-decoration:none">View &amp; pay invoice</a></p><div style="margin-top:26px;padding-top:24px;border-top:1px solid #edf2f2;text-align:center"><img src="cid:invoice-public-link-qr" width="108" height="108" alt="QR code to open invoice" style="display:block;margin:0 auto;border:0"><p style="margin:12px 0 0;color:#708593;font-size:12px;line-height:18px">Scan to open this invoice</p><p style="margin:10px 0 0"><a href="${escapeHtml(invoiceUrl)}" style="color:#176b70;font-size:12px;line-height:18px">Open invoice in browser</a></p></div><p style="margin:22px 0 0;color:#708593;font-size:12px;line-height:19px">Review the invoice details on Arklake before completing your payment.</p>`
-  const text = `${headline}\n\n${supporting}\n\n${details.map(([label, value]) => `${label}: ${value}`).join('\n')}\n\nView & pay invoice: ${invoiceUrl}\n\nVerify the invoice number, amount, and recipient before paying.`
+  const action = isPaid
+    ? `<p style="margin:26px 0 0"><a href="${escapeHtml(invoiceUrl)}" style="display:inline-block;border-radius:999px;background:#102a43;padding:13px 22px;color:#fff;font-size:14px;font-weight:700;text-decoration:none">View paid invoice</a></p><div style="margin-top:24px;padding-top:22px;border-top:1px solid #edf2f2"><p style="margin:0;color:#708593;font-size:12px;line-height:18px">Transaction</p><p style="margin:6px 0 0;color:#102a43;font-size:12px;line-height:18px">${escapeHtml(transactionLabel)}</p>${arcscanUrl ? `<p style="margin:9px 0 0"><a href="${escapeHtml(arcscanUrl)}" style="color:#176b70;font-size:12px;line-height:18px">View on Arcscan</a></p>` : ''}</div>`
+    : `<p style="margin:26px 0 0"><a href="${escapeHtml(invoiceUrl)}" style="display:inline-block;border-radius:999px;background:#102a43;padding:13px 22px;color:#fff;font-size:14px;font-weight:700;text-decoration:none">View &amp; pay invoice</a></p><div style="margin-top:26px;padding-top:24px;border-top:1px solid #edf2f2;text-align:center"><img src="cid:invoice-public-link-qr" width="108" height="108" alt="QR code to open invoice" style="display:block;margin:0 auto;border:0"><p style="margin:12px 0 0;color:#708593;font-size:12px;line-height:18px">Scan to open this invoice</p><p style="margin:10px 0 0"><a href="${escapeHtml(invoiceUrl)}" style="color:#176b70;font-size:12px;line-height:18px">Open invoice in browser</a></p></div><p style="margin:22px 0 0;color:#708593;font-size:12px;line-height:19px">Review the invoice details on Arklake before completing your payment.</p>`
+  const textAction = isPaid
+    ? `\n\nView paid invoice: ${invoiceUrl}${arcscanUrl ? `\n\nTransaction: ${transactionLabel}\nView on Arcscan: ${arcscanUrl}` : ''}`
+    : `\n\nView & pay invoice: ${invoiceUrl}\n\nVerify the invoice number, amount, and recipient before paying.`
+  const text = `${headline}\n\n${supporting}\n\n${details.map(([label, value]) => `${label}: ${value}`).join('\n')}${textAction}`
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(subject)}</title></head><body style="margin:0;background:#f3f8f8"><table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:36px 16px"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px"><tr><td align="center" style="padding-bottom:12px;font-family:Arial,sans-serif;color:#102a43"><img src="https://arklake.site/brand/arklake-mark-trimmed.png" width="36" height="36" alt="Arklake" style="display:block;border:0"><div style="padding-top:7px;font-size:18px;font-weight:700">Arklake</div></td></tr><tr><td style="border:1px solid #e7eeee;border-radius:20px;background:#fff;padding:34px 32px;font-family:Arial,sans-serif;color:#102a43"><h1 style="margin:0;font-size:28px;line-height:36px">${escapeHtml(headline)}</h1><p style="margin:14px 0 0;color:#526b7a;font-size:16px;line-height:25px">${escapeHtml(supporting)}</p><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:25px;border-top:1px solid #edf2f2;font-size:14px;line-height:21px">${rows}</table>${action}</td></tr><tr><td align="center" style="padding:18px 12px 0;font-family:Arial,sans-serif;color:#8aa0aa;font-size:12px">Arklake · Simple, secure payments</td></tr></table></td></tr></table></body></html>`
   return { subject, text, html, ...(qrContent ? { attachments: [{ filename: 'arklake-invoice-qr.png', content: qrContent.toString('base64'), content_type: 'image/png', content_id: 'invoice-public-link-qr' }] } : {}) }
 }
@@ -82,7 +90,7 @@ export async function processInvoiceEmailOutbox(
   for (const job of (jobs || []) as InvoiceEmailJob[]) {
     try {
       const { data: invoice, error: invoiceError } = await supabase.from('invoices')
-        .select('id,invoice_number,account_id,amount,asset,memo,status,created_at,expires_at,paid_at,payment_tx_hash')
+        .select('id,invoice_number,account_id,payer_email,amount,asset,memo,status,created_at,expires_at,paid_at,payment_tx_hash')
         .eq('id', job.invoice_id).eq('account_id', accountId).maybeSingle<InvoiceEmailRecord>()
       if (invoiceError || !invoice) throw invoiceError || new Error('Invoice was not found')
       if (job.event_type === 'invoice_paid' && (invoice.status !== 'paid' || !invoice.paid_at || !invoice.payment_tx_hash)) {
