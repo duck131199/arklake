@@ -2,6 +2,7 @@ import crypto from 'node:crypto'
 import { createClient } from '@supabase/supabase-js'
 import { normalizeCircleTransactions, type CircleTransaction, type OnchainLeg, type TokenDetails } from '../../server/circle/activity-core.js'
 import { activityEmail, notificationBelongsToAccount, notificationIdempotencyKey, transactionEmailEnabled, type EmailActivity } from '../../server/circle/activity-email.js'
+import { processInvoiceEmailOutbox } from '../../server/invoice-email.js'
 
 type VercelRequest = { method?: string; headers: { cookie?: string } }
 type VercelResponse = { status: (code: number) => VercelResponse; json: (body: object) => unknown }
@@ -277,6 +278,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       console.error('ARKLAKE_ACTIVITY_EMAIL_DELIVERY_FAILED', error instanceof Error ? error.message : 'Unknown error')
       return { enabled: true, sent: 0, failed: 1 }
     }) : { enabled: false, sent: 0, failed: 0 }
+    await processInvoiceEmailOutbox(supabase, session.account_id, {
+      enabled: process.env.ARKLAKE_INVOICE_EMAIL_ENABLED,
+      apiKey: process.env.RESEND_API_KEY,
+      from: process.env.RESEND_FROM_EMAIL,
+      publicUrl: process.env.ARKLAKE_PUBLIC_URL,
+    }).catch((error) => console.error('ARKLAKE_INVOICE_EMAIL_DELIVERY_FAILED', error instanceof Error ? error.message : 'Unknown error'))
     const { data: activityRows, error: activityError } = await supabase.from('wallet_activities')
       .select('id,activity_type,status,blockchain,tx_hash,source_address,destination_address,occurred_at,confirmed_at,raw_circle')
       .eq('account_id', session.account_id).order('occurred_at', { ascending: false }).limit(50)

@@ -1,6 +1,7 @@
 import crypto from 'node:crypto'
 import { createClient } from '@supabase/supabase-js'
 import { invoiceExpiresAt, validateInvoiceCreate } from '../server/invoice-core.js'
+import { processInvoiceEmailOutbox } from '../server/invoice-email.js'
 
 type VercelRequest = { method?: string; headers: { cookie?: string }; body?: unknown; query?: { id?: string | string[] } }
 type VercelResponse = { status: (code: number) => VercelResponse; json: (body: object) => unknown; setHeader: (name: string, value: string) => void }
@@ -80,6 +81,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         expires_at: invoiceExpiresAt(input.expiry),
       }).select(invoiceFields).single()
       if (error) throw error
+      await processInvoiceEmailOutbox(supabase, accountId, {
+        enabled: process.env.ARKLAKE_INVOICE_EMAIL_ENABLED,
+        apiKey: process.env.RESEND_API_KEY,
+        from: process.env.RESEND_FROM_EMAIL,
+        publicUrl: process.env.ARKLAKE_PUBLIC_URL,
+      }).catch((deliveryError) => console.error('ARKLAKE_INVOICE_EMAIL_DELIVERY_FAILED', deliveryError instanceof Error ? deliveryError.message : 'Unknown error'))
       return res.status(201).json({ invoice: data })
     }
 

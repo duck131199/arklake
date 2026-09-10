@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { createClient } from '@supabase/supabase-js'
 import { normalizePaymentTxHash, verifyInvoicePaymentReceipt, type InvoicePaymentReceipt } from '../server/invoice-payment-verify-core.js'
+import { processInvoiceEmailOutbox } from '../server/invoice-email.js'
 
 type VercelRequest = { method?: string; body?: unknown }
 type VercelResponse = { status: (code: number) => VercelResponse; json: (body: object) => unknown; setHeader: (name: string, value: string) => void }
@@ -103,6 +104,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const transition = result as { result?: string; paid_at?: string; payment_activity_id?: string | null } | null
     if (transition?.result === 'paid' || transition?.result === 'idempotent') {
       await supabase.from('invoice_payment_intents').update({ status: 'paid', updated_at: new Date().toISOString() }).eq('id', intentId)
+      await processInvoiceEmailOutbox(supabase, invoice.account_id, {
+        enabled: process.env.ARKLAKE_INVOICE_EMAIL_ENABLED,
+        apiKey: process.env.RESEND_API_KEY,
+        from: process.env.RESEND_FROM_EMAIL,
+        publicUrl: process.env.ARKLAKE_PUBLIC_URL,
+      }).catch((deliveryError) => console.error('ARKLAKE_INVOICE_EMAIL_DELIVERY_FAILED', deliveryError instanceof Error ? deliveryError.message : 'Unknown error'))
       return res.status(200).json({
       paid: true, txHash, paidAt: transition.paid_at, paymentActivityId: transition.payment_activity_id || null,
       idempotent: transition.result === 'idempotent', confirmations: verified.confirmations,

@@ -104,6 +104,7 @@ Status: **INVOICE CORE + PUBLIC INVOICE V1 CHECKPOINTED — PAYMENT ENTRY + DOWN
 - Pay with Arklake and Connect wallet auto-confirm are implemented locally and CODE PASS: Submitted remains distinct from Paid, pending confirmations are polled with a finite limit, strict verification alone transitions the invoice, and failed/timed-out confirmation leaves recovery available. Runtime review of both auto-confirm paths is pending.
 - Pay with Arklake P0 is CODE and RUNTIME PASS. Its applied migration enforces one unresolved Arklake attempt per invoice, persists Circle challenge/transaction identifiers before and after approval, and keeps submitted payments blocked across F5/reopen. Recovery uses the authenticated Arklake backend session to resolve the exact Circle transaction hash without client signing credentials, then binds the intent and runs strict Payment Verification. Submitted remains distinct from Paid; only a Circle terminal failure permits a new attempt.
 - Invoice email, receipt, Gateway, and invoice webhook work have not started.
+- Invoice Email V1 foundation is implemented locally and its outbox migration is applied. EMAIL 1 — New Invoice is CODE PASS, VISUAL PASS, and RUNTIME PASS with real Gmail delivery; the public-invoice CTA and URL-only QR work, including Gmail inline rendering after the Resend CID fix. Gmail spam placement was observed but is not a delivery blocker. The feature remains OFF unless `ARKLAKE_INVOICE_EMAIL_ENABLED=true`.
 
 ### Product constraint for future Public Invoice / Payment
 
