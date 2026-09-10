@@ -118,5 +118,6 @@ test('notification jobs are isolated to their owning account', () => {
   assert.equal(notificationBelongsToAccount('account-b', 'account-a'), false)
   const syncSource = readFileSync(new URL('../api/circle/activity-sync.ts', import.meta.url), 'utf8')
   assert.match(syncSource, /select\('id,account_id,activity_id,status,attempts'\)\.eq\('account_id', accountId\)/)
-  assert.equal((syncSource.match(/\.eq\('account_id', accountId\)/g) || []).length, 5)
+  assert.equal((syncSource.match(/\.eq\('account_id', accountId\)/g) || []).length, 6)
+  assert.match(syncSource, /status: 'suppressed'[\s\S]*\.eq\('id', item\.id\)\.eq\('account_id', accountId\)\.eq\('status', 'sending'\)/)
 })

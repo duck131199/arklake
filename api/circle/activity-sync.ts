@@ -2,6 +2,7 @@ import crypto from 'node:crypto'
 import { createClient } from '@supabase/supabase-js'
 import { normalizeCircleTransactions, type CircleTransaction, type OnchainLeg, type TokenDetails } from '../../server/circle/activity-core.js'
 import { activityEmail, notificationBelongsToAccount, notificationIdempotencyKey, transactionEmailEnabled, type EmailActivity } from '../../server/circle/activity-email.js'
+import { shouldSuppressGenericActivityEmail } from '../../server/circle/activity-email-suppression.js'
 import { processInvoiceEmailOutbox } from '../../server/invoice-email.js'
 
 type VercelRequest = { method?: string; headers: { cookie?: string } }
@@ -60,6 +61,17 @@ async function deliverActivityEmails(supabase: ReturnType<typeof supabaseClient>
         .select('id,activity_type,status,occurred_at,confirmed_at,blockchain,tx_hash,source_address,destination_address,raw_circle')
         .eq('id', item.activity_id).eq('account_id', accountId).eq('status', 'confirmed').maybeSingle()
       if (!activity) throw new Error('Confirmed wallet activity was not found')
+      if ((activity.activity_type === 'send' || activity.activity_type === 'receive') && activity.tx_hash) {
+        const { data: invoiceIntent, error: intentError } = await supabase.from('invoice_payment_intents')
+          .select('id').eq('tx_hash', activity.tx_hash.toLowerCase()).limit(1).maybeSingle<{ id: string }>()
+        if (intentError) throw new Error('Invoice payment correlation could not be checked')
+        if (invoiceIntent && shouldSuppressGenericActivityEmail(activity.activity_type, activity.tx_hash, new Set([activity.tx_hash.toLowerCase()]))) {
+          await supabase.from('wallet_activity_notification_outbox').update({
+            status: 'suppressed', last_error: 'Invoice payment notification is sent by the invoice email flow', updated_at: new Date().toISOString(),
+          }).eq('id', item.id).eq('account_id', accountId).eq('status', 'sending')
+          continue
+        }
+      }
       const { data: legs, error: legsError } = await supabase.from('wallet_activity_legs')
         .select('direction,amount,token_symbol,source_address,destination_address').eq('activity_id', activity.id).order('log_index', { ascending: true })
       if (legsError || !legs) throw new Error('Wallet activity legs could not be loaded')
@@ -266,8 +278,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       })))
       const { error: legsError } = await supabase.from('wallet_activity_legs').upsert(legs, { onConflict: 'leg_key' })
       if (legsError) throw new Error('Unable to save wallet activity legs')
-      const confirmedIds = emailEnabled ? saved.filter((row: { id: string; dedup_key: string }) => activities.find((activity) => activity.dedupKey === row.dedup_key)?.status === 'confirmed')
-        .map((row: { id: string }) => ({ account_id: session.account_id, activity_id: row.id, channel: 'email', status: 'pending' })) : []
+      const invoicePaymentHashes = new Set<string>()
+      if (emailEnabled) {
+        const hashes = activities.flatMap((activity) => activity.status === 'confirmed' && (activity.activityType === 'send' || activity.activityType === 'receive') && activity.txHash ? [activity.txHash.toLowerCase()] : [])
+        if (hashes.length) {
+          const { data: intents, error: intentsError } = await supabase.from('invoice_payment_intents').select('tx_hash').in('tx_hash', [...new Set(hashes)])
+          if (intentsError) throw new Error('Invoice payment correlation could not be checked')
+          for (const intent of intents || []) if (typeof intent.tx_hash === 'string') invoicePaymentHashes.add(intent.tx_hash.toLowerCase())
+        }
+      }
+      const confirmedIds = emailEnabled ? saved.flatMap((row: { id: string; dedup_key: string }) => {
+        const activity = activities.find((candidate) => candidate.dedupKey === row.dedup_key)
+        if (activity?.status !== 'confirmed') return []
+        const suppressed = shouldSuppressGenericActivityEmail(activity.activityType, activity.txHash, invoicePaymentHashes)
+        return [{ account_id: session.account_id, activity_id: row.id, channel: 'email', status: suppressed ? 'suppressed' : 'pending',
+          ...(suppressed ? { last_error: 'Invoice payment notification is sent by the invoice email flow' } : {}) }]
+      }) : []
       if (confirmedIds.length) {
         const { error: outboxError } = await supabase.from('wallet_activity_notification_outbox')
           .upsert(confirmedIds, { onConflict: 'activity_id,channel', ignoreDuplicates: true })

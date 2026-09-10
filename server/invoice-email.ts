@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import QRCode from 'qrcode'
 
-type InvoiceEmailEvent = 'invoice_created' | 'invoice_paid'
+type InvoiceEmailEvent = 'invoice_created' | 'invoice_paid' | 'invoice_payment_confirmed'
 type InvoiceEmailJob = {
   id: string
   account_id: string
@@ -47,15 +47,16 @@ export function invoiceEmailIdempotencyKey(invoiceId: string, eventType: Invoice
 
 export async function renderInvoiceEmail(eventType: InvoiceEmailEvent, invoice: InvoiceEmailRecord, sellerEmail: string, recipientEmail: string, publicUrl: string) {
   const amount = `${invoice.amount} ${invoice.asset}`
-  const isPaid = eventType === 'invoice_paid'
-  const subject = isPaid ? `Payment received for ${invoice.invoice_number}` : 'You received an invoice'
-  const headline = isPaid ? 'Invoice paid' : 'You received an invoice'
-  const supporting = isPaid ? 'Payment has been verified on-chain.' : 'Review the details below and pay securely through Arklake.'
+  const isPaid = eventType !== 'invoice_created'
+  const isPayerConfirmation = eventType === 'invoice_payment_confirmed'
+  const subject = isPayerConfirmation ? `Payment confirmed for ${invoice.invoice_number}` : isPaid ? `Payment received for ${invoice.invoice_number}` : 'You received an invoice'
+  const headline = isPayerConfirmation ? 'Invoice payment confirmed' : isPaid ? 'Invoice paid' : 'You received an invoice'
+  const supporting = isPayerConfirmation ? 'Your payment has been verified on-chain.' : isPaid ? 'Payment has been verified on-chain.' : 'Review the details below and pay securely through Arklake.'
   const invoiceUrl = `${publicUrl.replace(/\/$/, '')}/invoice/${encodeURIComponent(invoice.id)}`
   const arcscanUrl = invoice.payment_tx_hash ? `https://testnet.arcscan.app/tx/${encodeURIComponent(invoice.payment_tx_hash)}` : null
   const transactionLabel = invoice.payment_tx_hash ? `${invoice.payment_tx_hash.slice(0, 10)}...${invoice.payment_tx_hash.slice(-9)}` : ''
   const details = isPaid ? [
-    ['Invoice number', invoice.invoice_number], ['Paid by', invoice.payer_email], ['Amount', amount],
+    ['Invoice number', invoice.invoice_number], [isPayerConfirmation ? 'Paid to' : 'Paid by', isPayerConfirmation ? sellerEmail : invoice.payer_email], ['Amount', amount],
     ['Paid at', displayDate(invoice.paid_at || invoice.expires_at)], ['Payment details', `${invoice.asset} · Arc Testnet`],
   ] : [
     ['From', sellerEmail], ['Bill to', recipientEmail], ['Invoice number', invoice.invoice_number],
@@ -93,7 +94,7 @@ export async function processInvoiceEmailOutbox(
         .select('id,invoice_number,account_id,payer_email,amount,asset,memo,status,created_at,expires_at,paid_at,payment_tx_hash')
         .eq('id', job.invoice_id).eq('account_id', accountId).maybeSingle<InvoiceEmailRecord>()
       if (invoiceError || !invoice) throw invoiceError || new Error('Invoice was not found')
-      if (job.event_type === 'invoice_paid' && (invoice.status !== 'paid' || !invoice.paid_at || !invoice.payment_tx_hash)) {
+      if (job.event_type !== 'invoice_created' && (invoice.status !== 'paid' || !invoice.paid_at || !invoice.payment_tx_hash)) {
         throw new Error('Invoice is not verified paid')
       }
       const { data: seller, error: sellerError } = await supabase.from('arklake_accounts').select('email').eq('id', accountId).maybeSingle<{ email: string }>()

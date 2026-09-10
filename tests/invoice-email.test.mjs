@@ -2,9 +2,11 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { invoiceEmailEnabled, invoiceEmailIdempotencyKey, processInvoiceEmailOutbox, renderInvoiceEmail } from '../server/invoice-email.ts'
+import { shouldSuppressGenericActivityEmail } from '../server/circle/activity-email-suppression.ts'
 
 const migration = readFileSync(new URL('../supabase/migrations/202609090002_invoice_email_outbox.sql', import.meta.url), 'utf8')
 const paidSellerMigration = readFileSync(new URL('../supabase/migrations/202609100001_invoice_paid_email_seller.sql', import.meta.url), 'utf8')
+const payerConfirmationMigration = readFileSync(new URL('../supabase/migrations/202609100002_invoice_payment_confirmed_email.sql', import.meta.url), 'utf8')
 const createApi = readFileSync(new URL('../api/invoices.ts', import.meta.url), 'utf8')
 const verifyApi = readFileSync(new URL('../api/invoice-payment-verify.ts', import.meta.url), 'utf8')
 const activitySync = readFileSync(new URL('../api/circle/activity-sync.ts', import.meta.url), 'utf8')
@@ -63,6 +65,18 @@ test('missing seller email skips notification without rolling back the Paid tran
   const conditionalEnqueue = paidSellerMigration.indexOf("if position('@' in coalesce(seller_email, '')) > 1 then")
   const paidResult = paidSellerMigration.indexOf("jsonb_build_object('result', 'paid'")
   assert.ok(paidUpdate >= 0 && sellerLookup > paidUpdate && conditionalEnqueue > sellerLookup && paidResult > conditionalEnqueue)
+})
+
+test('verified Paid transition independently enqueues one seller and one payer notification', () => {
+  const paidUpdate = payerConfirmationMigration.indexOf("set status = 'paid'")
+  const sellerEnqueue = payerConfirmationMigration.indexOf("'invoice_paid', seller_email")
+  const payerEnqueue = payerConfirmationMigration.indexOf("'invoice_payment_confirmed', target.payer_email")
+  assert.ok(paidUpdate >= 0 && sellerEnqueue > paidUpdate && payerEnqueue > sellerEnqueue)
+  assert.match(payerConfirmationMigration, /check \(event_type in \('invoice_created', 'invoice_paid', 'invoice_payment_confirmed'\)\)/)
+  assert.match(payerConfirmationMigration, /on conflict \(invoice_id, event_type\) do nothing/g)
+  assert.match(payerConfirmationMigration, /if position\('@' in coalesce\(seller_email, ''\)\) > 1 then/)
+  assert.match(payerConfirmationMigration, /if position\('@' in coalesce\(target\.payer_email, ''\)\) > 1 then/)
+  assert.ok(payerConfirmationMigration.indexOf("if target.status = 'paid' then") < sellerEnqueue)
 })
 
 test('the one historical failed Paid job remains recorded but cannot be retried', () => {
@@ -160,4 +174,37 @@ test('Paid email confirms verified payment to the seller without receipt languag
   assert.doesNotMatch(`${message.subject}\n${message.text}\n${message.html}`, /receipt/i)
   assert.equal(message.attachments, undefined)
   assert.equal(invoiceEmailIdempotencyKey(invoice.id, 'invoice_paid'), `invoice-email-${invoice.id}-invoice_paid`)
+})
+
+test('payer confirmation renders the verified invoice payment with stable idempotency', async () => {
+  const paidInvoice = { ...invoice, status: 'paid', paid_at: '2026-09-10T02:55:28Z', payment_tx_hash: `0x${'b'.repeat(64)}` }
+  const message = await renderInvoiceEmail('invoice_payment_confirmed', paidInvoice, 'seller@example.com', 'payer@example.com', 'https://arklake.site')
+  assert.equal(message.subject, 'Payment confirmed for ARK-20260909-EMAIL')
+  assert.match(message.text, /^Invoice payment confirmed/m)
+  assert.match(message.text, /Your payment has been verified on-chain\./)
+  assert.match(message.text, /Invoice number: ARK-20260909-EMAIL/)
+  assert.match(message.text, /Paid to: seller@example\.com/)
+  assert.match(message.text, /Amount: 12\.5 USDC/)
+  assert.match(message.text, /Paid at: Sep 10, 2026 · 2:55 AM UTC/)
+  assert.match(message.text, /Payment details: USDC · Arc Testnet/)
+  assert.match(message.text, /Transaction: 0xbbbbbbbb\.\.\.bbbbbbbbb/)
+  assert.match(message.html, /View paid invoice/)
+  assert.match(message.html, /View on Arcscan/)
+  assert.doesNotMatch(`${message.subject}\n${message.text}\n${message.html}`, /receipt/i)
+  assert.equal(invoiceEmailIdempotencyKey(invoice.id, 'invoice_payment_confirmed'), `invoice-email-${invoice.id}-invoice_payment_confirmed`)
+})
+
+test('generic Send and Receive are suppressed only by an exact invoice intent transaction hash', () => {
+  const invoiceHashes = new Set(['0xabcdef'])
+  assert.equal(shouldSuppressGenericActivityEmail('send', '0xABCDEF', invoiceHashes), true)
+  assert.equal(shouldSuppressGenericActivityEmail('receive', '0xabcdef', invoiceHashes), true)
+  assert.equal(shouldSuppressGenericActivityEmail('send', '0xabcdee', invoiceHashes), false)
+  assert.equal(shouldSuppressGenericActivityEmail('receive', null, invoiceHashes), false)
+  assert.equal(shouldSuppressGenericActivityEmail('swap', '0xabcdef', invoiceHashes), false)
+})
+
+test('activity email suppression guards both enqueue and delivery races', () => {
+  assert.match(activitySync, /invoicePaymentHashes[\s\S]*shouldSuppressGenericActivityEmail\(activity\.activityType, activity\.txHash, invoicePaymentHashes\)[\s\S]*status: suppressed \? 'suppressed' : 'pending'/)
+  assert.match(activitySync, /eq\('tx_hash', activity\.tx_hash\.toLowerCase\(\)\)[\s\S]*status: 'suppressed'/)
+  assert.match(activitySync, /Invoice payment notification is sent by the invoice email flow/)
 })
