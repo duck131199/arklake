@@ -4059,6 +4059,25 @@ function TransactionDetail({ activity, onClose }: { activity: WalletActivity; on
 }
 
 function AppSwapPage({ onNavigate, balances, wallet, circleAuth, email, onBalancesRefresh, onCircleAuthRefresh }: { onNavigate: AppNavigateHandler; balances: ArklakeTokenBalance[]; wallet: ArklakeWalletIdentity | null; circleAuth: CircleAuthContext | null; email: string; onBalancesRefresh: (balances: ArklakeTokenBalance[]) => void; onCircleAuthRefresh: (circleAuth: CircleSessionRefresh) => Promise<boolean> }) {
+  const swapActivityPollRef = useRef<AbortController | null>(null)
+  useEffect(() => () => { swapActivityPollRef.current?.abort() }, [])
+  const pollActivityForSwap = (txHash: string) => {
+    swapActivityPollRef.current?.abort()
+    const controller = new AbortController()
+    swapActivityPollRef.current = controller
+    void runBoundedVisiblePoll({
+      intervalMs: 5000,
+      timeoutMs: 60000,
+      signal: controller.signal,
+      isVisible: () => document.visibilityState === 'visible',
+      check: async () => {
+        const response = await fetch('/api/circle/activity-sync', { method: 'POST' })
+        const data = await response.json().catch(() => null) as { activities?: WalletActivity[] } | null
+        return response.ok && Array.isArray(data?.activities)
+          && data.activities.some((activity) => activity.txHash?.toLowerCase() === txHash.toLowerCase())
+      },
+    }).catch(() => {})
+  }
   const refreshBalances = async () => {
     if (!wallet || !circleAuth) throw new Error('Signing access is required.')
     const response = await fetch(arklakeCircleWalletEndpoint, {
@@ -4073,7 +4092,7 @@ function AppSwapPage({ onNavigate, balances, wallet, circleAuth, email, onBalanc
   }
   return (
     <AppShell activeItem="Swap" title="Swap" subtitle="Convert your assets." onNavigate={onNavigate}>
-      <SwapFlow key={wallet?.id} wallet={wallet} balances={getUserFacingBalances(balances)} circleAuth={circleAuth} appId={circleAppId || ''} refreshBalances={refreshBalances} signingPanel={<CircleSigningReauthPanel email={email} onComplete={onCircleAuthRefresh} title="Wallet approval needed" />} />
+      <SwapFlow key={wallet?.id} wallet={wallet} balances={getUserFacingBalances(balances)} circleAuth={circleAuth} appId={circleAppId || ''} refreshBalances={refreshBalances} onSwapConfirmed={pollActivityForSwap} signingPanel={<CircleSigningReauthPanel email={email} onComplete={onCircleAuthRefresh} title="Wallet approval needed" />} />
     </AppShell>
   )
 }

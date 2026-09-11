@@ -46,3 +46,16 @@ test('wallet wiring coalesces focus and visibility refresh and avoids duplicate 
   assert.match(app, /intervalMs: 3000,[\s\S]*timeoutMs: 60000/)
   assert.match(app, /hasActivityBaselineRef\.current &&/)
 })
+
+test('Swap confirmation starts one bounded exact-transaction activity poll', () => {
+  const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
+  const swap = readFileSync(new URL('../src/SwapFlow.tsx', import.meta.url), 'utf8')
+  assert.match(swap, /onSwapConfirmed\?\.\(confirmedTxHash\)/)
+  assert.match(swap, /finish\(balances, event\.txHash\)/)
+  assert.match(swap, /finish\(undefined, pending\.txHash\)/)
+  assert.match(app, /onSwapConfirmed=\{pollActivityForSwap\}/)
+  assert.match(app, /swapActivityPollRef\.current\?\.abort\(\)[\s\S]*new AbortController\(\)/)
+  assert.match(app, /intervalMs: 5000,[\s\S]*timeoutMs: 60000,[\s\S]*document\.visibilityState === 'visible'/)
+  assert.match(app, /activity\.txHash\?\.toLowerCase\(\) === txHash\.toLowerCase\(\)/)
+  assert.match(app, /useEffect\(\(\) => \(\) => \{ swapActivityPollRef\.current\?\.abort\(\) \}, \[\]\)/)
+})

@@ -12,6 +12,7 @@ type Props = {
   appId: string
   signingPanel: ReactNode
   refreshBalances: () => Promise<Balance[]>
+  onSwapConfirmed?: (txHash: string) => void
 }
 
 const units = (amount: string) => {
@@ -20,7 +21,7 @@ const units = (amount: string) => {
 }
 const available = (balances: Balance[], asset: Asset) => balances.find((balance) => balance.symbol.toLowerCase() === asset.toLowerCase())?.amount || '0'
 
-export default function SwapFlow({ wallet, balances, circleAuth, appId, signingPanel, refreshBalances }: Props) {
+export default function SwapFlow({ wallet, balances, circleAuth, appId, signingPanel, refreshBalances, onSwapConfirmed }: Props) {
   const [tokenIn, setTokenIn] = useState<Asset>('USDC')
   const [tokenOut, setTokenOut] = useState<Asset>('EURC')
   const [amount, setAmount] = useState('')
@@ -71,7 +72,8 @@ export default function SwapFlow({ wallet, balances, circleAuth, appId, signingP
     const timer = window.setTimeout(() => { void getQuote() }, Math.max(0, quote.expiresAt - Date.now()))
     return () => window.clearTimeout(timer)
   }, [quote?.expiresAt, pending])
-  const finish = async (before?: Balance[]) => {
+  const finish = async (before?: Balance[], confirmedTxHash?: string) => {
+    if (confirmedTxHash) onSwapConfirmed?.(confirmedTxHash)
     remember(null)
     setQuote(null)
     setAmount('')
@@ -98,7 +100,7 @@ export default function SwapFlow({ wallet, balances, circleAuth, appId, signingP
       const response = await request({ action: 'status', txHash: pending.txHash })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || 'Status is unavailable.')
-      if (data.confirmed) await finish()
+      if (data.confirmed) await finish(undefined, pending.txHash)
       else if (data.failed) { remember(null); setQuote(null); setError('Swap failed on-chain. Review the transaction before getting a new quote.') }
       else setMessage('Swap confirmation is still pending. Do not submit another swap.')
     } catch (error) { setError(error instanceof Error ? error.message : 'Unable to check swap status.') }
@@ -158,7 +160,7 @@ export default function SwapFlow({ wallet, balances, circleAuth, appId, signingP
             setMessage('Swap submitted. Verifying on-chain confirmation…')
           } else if (event.type === 'confirmed') {
             terminal = true
-            await finish(balances)
+            await finish(balances, event.txHash)
           } else if (event.type === 'failed') {
             terminal = true
             remember(null)
@@ -175,7 +177,7 @@ export default function SwapFlow({ wallet, balances, circleAuth, appId, signingP
               const response = await request({ action: 'status', txHash: event.txHash })
               if (!response.ok) break
               const status = await response.json()
-              if (status.confirmed) { await finish(balances); break }
+              if (status.confirmed) { await finish(balances, event.txHash); break }
               if (status.failed) { remember(null); setError('Swap failed on-chain. Review the transaction before retrying.'); break }
             }
           }

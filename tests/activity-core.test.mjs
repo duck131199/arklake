@@ -104,7 +104,18 @@ test('transaction email content matches receive, send, and swap movements', () =
   const send = activityEmail({ ...common, type: 'send', legs: [{ direction: 'out', amount: '1', symbol: 'EURC' }] })
   assert.equal(send.subject, '1 EURC sent successfully')
   assert.match(send.text, /^EURC sent successfully/)
-  assert.match(activityEmail({ ...common, type: 'swap', legs: [{ direction: 'out', amount: '1', symbol: 'USDC' }, { direction: 'in', amount: '0.76', symbol: 'EURC' }] }).text, /Swap successful\n\nYour swap has been confirmed\.\n\n1 USDC → 0.76 EURC/)
+  const swapHash = '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef'
+  const swap = activityEmail({ ...common, txHash: swapHash, networkFee: '0.000024 USDC', type: 'swap', legs: [{ direction: 'out', amount: '1', symbol: 'USDC' }, { direction: 'in', amount: '0.76', symbol: 'EURC' }] })
+  assert.equal(swap.subject, 'Swap confirmed: 1 USDC → 0.76 EURC')
+  assert.match(swap.text, /^Swap confirmed\n\nYour swap has been confirmed on-chain\./)
+  assert.match(swap.text, /You swapped: 1 USDC/)
+  assert.match(swap.text, /You received: 0\.76 EURC/)
+  assert.match(swap.text, /Confirmed at: .* UTC/)
+  assert.match(swap.text, /Network: Arc Testnet/)
+  assert.match(swap.text, /Transaction: 0x1234…cdef/)
+  assert.match(swap.text, new RegExp(`View on Arcscan: https://testnet\\.arcscan\\.app/tx/${swapHash}`))
+  assert.doesNotMatch(swap.text, /Fee|Rate|Minimum|Slippage|0\.000024/)
+  assert.match(swap.html, /https:\/\/arklake\.site\/brand\/arklake-mark-trimmed\.png/)
 })
 
 test('transaction email uses one stable provider idempotency key per activity', () => {
@@ -114,6 +125,8 @@ test('transaction email uses one stable provider idempotency key per activity', 
   assert.match(migration, /unique \(activity_id, channel\)/)
   assert.match(migration, /select account_id, id, 'suppressed'.*Existing confirmed activity/s)
   assert.match(migration, /on conflict \(activity_id, channel\) do nothing/)
+  const syncSource = readFileSync(new URL('../api/circle/activity-sync.ts', import.meta.url), 'utf8')
+  assert.match(syncSource, /upsert\(confirmedIds, \{ onConflict: 'activity_id,channel', ignoreDuplicates: true \}\)/)
 })
 
 test('transaction email feature flag is off by default and only explicit true enables it', () => {
