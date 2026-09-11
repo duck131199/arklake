@@ -15,6 +15,13 @@ const isAmount = (value: unknown): value is string => typeof value === 'string' 
 const isAsset = (value: unknown): value is Asset => assets.includes(value as Asset)
 const sign = (body: string, key: string) => createHmac('sha256', key).update(`arklake-swap:${body}`).digest('base64url')
 
+function unsupportedRoute(error: unknown) {
+  if (!error || typeof error !== 'object') return false
+  const candidate = error as { code?: unknown; message?: unknown; cause?: { code?: unknown; message?: unknown } }
+  const values = [candidate.code, candidate.message, candidate.cause?.code, candidate.cause?.message]
+  return values.some((value) => value === 1003 || (typeof value === 'string' && (value === 'INPUT_UNSUPPORTED_ROUTE' || /no route available/i.test(value))))
+}
+
 function readQuote(token: unknown, key: string): Quote {
   if (typeof token !== 'string' || token.length > 4096) throw new Error('Invalid quote. Get a new quote.')
   const [body, signature = ''] = token.split('.')
@@ -144,15 +151,18 @@ export default async function handler(req: IncomingMessage & { body?: Record<str
     }
   } catch (error) {
     // Never expose upstream error objects: they can contain authorization headers.
+    const routeUnavailable = body.action === 'quote' && unsupportedRoute(error)
     const message = error instanceof Error && /^(Invalid quote|Quote expired)/.test(error.message)
       ? error.message
+      : routeUnavailable
+        ? 'No swap route is currently available for this pair and amount. Try a different amount or pair.'
       : body.action === 'quote'
         ? 'Live quote unavailable for this pair and amount. The route, liquidity, balance, gas, or quote service may be unavailable. Try a smaller amount or retry later.'
         : challenged
           ? 'Swap outcome is not confirmed. Check wallet activity before starting another swap.'
           : 'Unable to prepare swap. Refresh signing access or get a new quote.'
     if (streaming) emit({ type: 'error', message, uncertain: challenged })
-    else json(body.action === 'quote' ? 422 : 400, { error: message })
+    else json(body.action === 'quote' ? 422 : 400, { error: message, ...(routeUnavailable ? { code: 'INPUT_UNSUPPORTED_ROUTE' } : {}) })
   } finally {
     if (heartbeat) clearInterval(heartbeat)
     if (streaming && !res.writableEnded) res.end()

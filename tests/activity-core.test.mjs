@@ -9,7 +9,7 @@ const context = vm.createContext({ Date, Map, Set })
 const module = new vm.SourceTextModule(source, { context })
 await module.link(() => { throw new Error('Unexpected import') })
 await module.evaluate()
-const { normalizeCircleTransactions } = module.namespace
+const { arcTestnetCanonicalTokens, decodeArcTransferLegs, normalizeCircleTransactions } = module.namespace
 
 const emailSource = stripTypeScriptTypes(readFileSync(new URL('../server/circle/activity-email.ts', import.meta.url), 'utf8'))
 const emailModule = new vm.SourceTextModule(emailSource, { context })
@@ -17,6 +17,33 @@ await emailModule.link(() => { throw new Error('Unexpected import') })
 await emailModule.evaluate()
 const { activityEmail, activityEmailMaySend, notificationBelongsToAccount, notificationIdempotencyKey, transactionEmailActivationTime, transactionEmailEnabled } = emailModule.namespace
 const base = { walletId: 'wallet-1', blockchain: 'ARC-TESTNET', state: 'CONFIRMED', operation: 'TRANSFER', createDate: '2026-09-07T01:00:00Z', updateDate: '2026-09-07T01:01:00Z' }
+const wallet = '0x1111111111111111111111111111111111111111'
+const router = '0x2222222222222222222222222222222222222222'
+const topic = (address) => `0x${'0'.repeat(24)}${address.slice(2)}`
+const transferLog = (token, from, to, amount, logIndex) => ({
+  address: token.tokenAddress,
+  data: `0x${BigInt(amount).toString(16)}`,
+  logIndex: `0x${logIndex.toString(16)}`,
+  topics: ['0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef', topic(from), topic(to)],
+})
+const token = (symbol) => arcTestnetCanonicalTokens.find((item) => item.symbol === symbol)
+const baseUnits = (value, decimals) => {
+  const [whole, fraction = ''] = value.split('.')
+  return BigInt(`${whole}${fraction.padEnd(decimals, '0')}`)
+}
+const swapFromReceipt = (fromSymbol, fromAmount, toSymbol, toAmount) => {
+  const hash = `0x${fromSymbol.toLowerCase()}-${toSymbol.toLowerCase()}`
+  const transactions = [
+    { ...base, id: `${hash}-contract`, operation: 'CONTRACT_EXECUTION', transactionType: 'OUTBOUND', amounts: [], txHash: hash, sourceAddress: wallet },
+    { ...base, id: `${hash}-in`, transactionType: 'INBOUND', amounts: [toAmount], token: token(toSymbol), txHash: hash, destinationAddress: wallet },
+  ]
+  const logs = [
+    transferLog(token(fromSymbol), wallet, router, baseUnits(fromAmount, token(fromSymbol).decimals), 1),
+    transferLog(token(toSymbol), router, wallet, baseUnits(toAmount, token(toSymbol).decimals), 2),
+  ]
+  const receiptLegs = new Map([[hash, decodeArcTransferLegs(logs, wallet, new Map()).map((leg) => ({ ...leg, txHash: hash }))]])
+  return normalizeCircleTransactions(transactions, new Map(), 'wallet-1', receiptLegs)[0]
+}
 
 test('classifies real one-way transfers as receive and send', () => {
   const result = normalizeCircleTransactions([
@@ -55,6 +82,44 @@ test('upgrades Circle inbound plus amount-less contract execution using receipt 
     ['out', '1', 'USDC'], ['in', '0.764335', 'EURC'],
   ])
   assert.equal(result[0].legs[1].legKey, 'swap-in:in:circle-eurc:0')
+})
+
+test('canonical Arc registry classifies cirBTC swaps without dynamic wallet token metadata', () => {
+  const cirbtcToUsdc = swapFromReceipt('cirBTC', '0.0001', 'USDC', '37.19659')
+  assert.equal(cirbtcToUsdc.activityType, 'swap')
+  assert.deepEqual(cirbtcToUsdc.legs.map((leg) => [leg.direction, leg.amount, leg.tokenSymbol]), [['out', '0.0001', 'cirBTC'], ['in', '37.19659', 'USDC']])
+
+  const cirbtcToEurc = swapFromReceipt('cirBTC', '0.0001', 'EURC', '29.692352')
+  assert.equal(cirbtcToEurc.activityType, 'swap')
+  assert.deepEqual(cirbtcToEurc.legs.map((leg) => leg.tokenSymbol), ['cirBTC', 'EURC'])
+
+  const usdcToCirbtc = swapFromReceipt('USDC', '5', 'cirBTC', '0.00001355')
+  const eurcToCirbtc = swapFromReceipt('EURC', '5', 'cirBTC', '0.0000169')
+  assert.equal(usdcToCirbtc.activityType, 'swap')
+  assert.equal(eurcToCirbtc.activityType, 'swap')
+  assert.equal(usdcToCirbtc.legs.find((leg) => leg.direction === 'in').amount, '0.00001355')
+  assert.equal(eurcToCirbtc.legs.find((leg) => leg.direction === 'in').amount, '0.0000169')
+  const withLateDynamicMetadata = decodeArcTransferLegs([
+    transferLog(token('cirBTC'), wallet, router, baseUnits('0.0001', 8), 1),
+    transferLog(token('USDC'), router, wallet, baseUnits('37.19659', 6), 2),
+  ], wallet, new Map([['late-cirbtc', { id: 'late-cirbtc', symbol: 'WRONG', tokenAddress: token('cirBTC').tokenAddress, decimals: 18 }]]))
+  assert.equal(withLateDynamicMetadata[0].tokenId, 'arc-testnet-cirbtc')
+  assert.equal(withLateDynamicMetadata[0].tokenSymbol, 'cirBTC')
+  assert.equal(withLateDynamicMetadata[0].tokenDecimals, 8)
+  const syncSource = readFileSync(new URL('../api/circle/activity-sync.ts', import.meta.url), 'utf8')
+  assert.match(syncSource, /decodeArcTransferLegs\(payload\.result\.logs, walletAddress, tokens\)/)
+  assert.match(syncSource, /throw new Error\('Swap receipt could not be verified'\)/)
+})
+
+test('canonical receipt decoding preserves pure cirBTC, USDC, and EURC receives', () => {
+  for (const [symbol, units, expected] of [['cirBTC', 10000n, '0.0001'], ['USDC', 1000000n, '1'], ['EURC', 2500000n, '2.5']]) {
+    const hash = `0xpure-${symbol}`
+    const logs = [transferLog(token(symbol), router, wallet, units, 1)]
+    const receiptLegs = new Map([[hash, decodeArcTransferLegs(logs, wallet, new Map()).map((leg) => ({ ...leg, txHash: hash }))]])
+    const result = normalizeCircleTransactions([{ ...base, id: hash, transactionType: 'INBOUND', amounts: [expected], token: token(symbol), txHash: hash }], new Map(), 'wallet-1', receiptLegs)
+    assert.equal(result[0].activityType, 'receive')
+    assert.equal(result[0].legs[0].tokenSymbol, symbol)
+  }
 })
 
 test('reuses an unambiguous Circle leg when its token ID has no resolvable contract metadata', () => {

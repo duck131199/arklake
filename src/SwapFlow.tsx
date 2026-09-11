@@ -62,7 +62,9 @@ export default function SwapFlow({ wallet, balances, circleAuth, appId, signingP
     try {
       const response = await request({ action: 'quote', tokenIn, tokenOut, amount })
       const data = await response.json()
-      if (!response.ok) throw new Error('Quote unavailable for this amount. Try a smaller amount.')
+      if (!response.ok) throw new Error(data?.code === 'INPUT_UNSUPPORTED_ROUTE'
+        ? 'No swap route is currently available for this pair and amount. Try a different amount or pair.'
+        : 'Quote unavailable for this amount. Try a smaller amount.')
       setQuote(data)
     } catch (error) { setError(error instanceof Error ? error.message : 'Quote service is unavailable.') }
     finally { running.current = false; setBusy(false) }

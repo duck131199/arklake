@@ -10,7 +10,7 @@ const address = `0x${'1'.repeat(40)}`
 const txHash = `0x${'2'.repeat(64)}`
 
 async function fixture() {
-  const state = { adapterOptions: null, swapCalls: 0, unavailable: false, receipt: null, progress: 'DONE', walletId: 'wallet-1', now: Date.now() }
+  const state = { adapterOptions: null, swapCalls: 0, unavailable: false, unsupportedRoute: false, receipt: null, progress: 'DONE', walletId: 'wallet-1', now: Date.now() }
   const context = vm.createContext({
     Buffer, AbortSignal, setInterval, clearInterval,
     Date: class extends Date { static now() { return state.now } },
@@ -23,6 +23,7 @@ async function fixture() {
     async estimate(params) {
       assert.equal(params.config.allowanceStrategy, 'approve')
       assert.equal(params.config.slippageBps, 50)
+      if (state.unsupportedRoute) throw Object.assign(new Error('Stablecoin Service createSwap failed: No route available'), { code: 'INPUT_UNSUPPORTED_ROUTE' })
       if (state.unavailable) throw new Error('no liquidity; Authorization: secret must not be exposed')
       return { estimatedOutput: { amount: '0.99' }, stopLimit: { amount: '0.98' }, fees: [] }
     }
@@ -78,6 +79,19 @@ test('unavailable quotes are truthful, do not execute, and do not leak upstream 
   assert.match(result.error, /Live quote unavailable/)
   assert.doesNotMatch(result.error, /Authorization|secret/)
   assert.equal(f.state.swapCalls, 0)
+})
+
+test('unsupported routes have a specific actionable message without assuming a smaller amount works', async () => {
+  const f = await fixture()
+  f.state.unsupportedRoute = true
+  const result = await f.quote('USDC', 'cirBTC')
+  assert.equal(result.code, 'INPUT_UNSUPPORTED_ROUTE')
+  assert.equal(result.error, 'No swap route is currently available for this pair and amount. Try a different amount or pair.')
+  assert.doesNotMatch(result.error, /smaller amount/i)
+  assert.equal(f.state.swapCalls, 0)
+  const ui = readFileSync(new URL('../src/SwapFlow.tsx', import.meta.url), 'utf8')
+  assert.match(ui, /data\?\.code === 'INPUT_UNSUPPORTED_ROUTE'/)
+  assert.match(ui, /No swap route is currently available for this pair and amount\. Try a different amount or pair\./)
 })
 
 test('reject tampered, expired, and different-wallet quotes before executing', async () => {

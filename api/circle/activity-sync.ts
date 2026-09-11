@@ -1,6 +1,6 @@
 import crypto from 'node:crypto'
 import { createClient } from '@supabase/supabase-js'
-import { normalizeCircleTransactions, type CircleTransaction, type OnchainLeg, type TokenDetails } from '../../server/circle/activity-core.js'
+import { decodeArcTransferLegs, normalizeCircleTransactions, type CircleTransaction, type OnchainLeg, type TokenDetails } from '../../server/circle/activity-core.js'
 import { activityEmail, activityEmailMaySend, notificationBelongsToAccount, notificationIdempotencyKey, transactionEmailActivationTime, transactionEmailEnabled, type EmailActivity } from '../../server/circle/activity-email.js'
 import { shouldSuppressGenericActivityEmail } from '../../server/circle/activity-email-suppression.js'
 import { arcTestnetChainIdHex, counterpartyActivityType, internalCounterpartyAddress, internalTransferUsdcAddress, reconciledDedupKey, reconciledLegKey, verifyInternalUsdcTransfer, type ArcReceipt } from '../../server/circle/internal-transfer.js'
@@ -12,7 +12,6 @@ type VercelResponse = { status: (code: number) => VercelResponse; json: (body: o
 const circleBaseUrl = 'https://api.circle.com/v1/w3s'
 const cookieName = 'arklake_session'
 const arcRpcUrl = 'https://rpc.testnet.arc.network'
-const transferTopic = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'
 
 type StoredSession = {
   sid: string
@@ -184,13 +183,6 @@ async function walletTokenDetails(walletId: string, userToken: string) {
   return payload.data.tokenBalances.flatMap((balance) => balance.token?.id ? [balance.token] : [])
 }
 
-function formatTokenAmount(value: bigint, decimals: number) {
-  if (decimals === 0) return value.toString()
-  const scale = 10n ** BigInt(decimals)
-  const fraction = (value % scale).toString().padStart(decimals, '0').replace(/0+$/, '')
-  return fraction ? `${value / scale}.${fraction}` : (value / scale).toString()
-}
-
 async function swapReceiptLegs(transactions: CircleTransaction[], walletAddress: string, tokens: Map<string, TokenDetails>) {
   const groups = new Map<string, CircleTransaction[]>()
   for (const transaction of transactions) {
@@ -200,9 +192,6 @@ async function swapReceiptLegs(transactions: CircleTransaction[], walletAddress:
   }
   const candidates = [...groups.entries()].filter(([, group]) => group.some((transaction) => transaction.transactionType === 'INBOUND' && (transaction.amounts?.length || 0) > 0)
     && group.some((transaction) => transaction.transactionType === 'OUTBOUND' && transaction.operation === 'CONTRACT_EXECUTION' && (transaction.amounts?.length || 0) === 0))
-  const byAddress = new Map([...tokens.values()].flatMap((token) => token.tokenAddress && Number.isInteger(token.decimals)
-    ? [[token.tokenAddress.toLowerCase(), token] as const] : []))
-  const wallet = walletAddress.toLowerCase()
   const entries = await Promise.all(candidates.map(async ([hash]) => {
     const response = await fetch(arcRpcUrl, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -210,20 +199,8 @@ async function swapReceiptLegs(transactions: CircleTransaction[], walletAddress:
       signal: AbortSignal.timeout(15000),
     })
     const payload = await response.json().catch(() => null) as { result?: { status?: string; logs?: Array<{ address: string; data: string; logIndex: string; topics: string[] }> } } | null
-    if (!response.ok || payload?.result?.status !== '0x1' || !Array.isArray(payload.result.logs)) return [hash, [] as OnchainLeg[]] as const
-    const legs = payload.result.logs.flatMap((log): OnchainLeg[] => {
-      if (log.topics?.[0]?.toLowerCase() !== transferTopic || log.topics.length < 3 || !/^0x[0-9a-fA-F]+$/.test(log.data)) return []
-      const sourceAddress = `0x${log.topics[1].slice(-40)}`.toLowerCase()
-      const destinationAddress = `0x${log.topics[2].slice(-40)}`.toLowerCase()
-      const token = byAddress.get(log.address.toLowerCase())
-      if (!token?.tokenAddress || !Number.isInteger(token.decimals) || (sourceAddress !== wallet && destinationAddress !== wallet)) return []
-      return [{
-        txHash: hash, logIndex: Number.parseInt(log.logIndex, 16), direction: sourceAddress === wallet ? 'out' : 'in',
-        amount: formatTokenAmount(BigInt(log.data), token.decimals!), tokenId: token.id,
-        tokenAddress: token.tokenAddress, tokenSymbol: token.symbol, tokenDecimals: token.decimals!,
-        sourceAddress, destinationAddress,
-      }]
-    })
+    if (!response.ok || payload?.result?.status !== '0x1' || !Array.isArray(payload.result.logs)) throw new Error('Swap receipt could not be verified')
+    const legs = decodeArcTransferLegs(payload.result.logs, walletAddress, tokens).map((leg) => ({ ...leg, txHash: hash }))
     return [hash, legs] as const
   }))
   return new Map(entries)

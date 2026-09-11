@@ -18,6 +18,49 @@ export type CircleTransaction = {
 
 export type TokenDetails = { id: string; symbol?: string; tokenAddress?: string; decimals?: number }
 
+export const arcTestnetCanonicalTokens: TokenDetails[] = [
+  { id: 'arc-testnet-usdc', symbol: 'USDC', tokenAddress: '0x3600000000000000000000000000000000000000', decimals: 6 },
+  { id: 'arc-testnet-eurc', symbol: 'EURC', tokenAddress: '0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a', decimals: 6 },
+  { id: 'arc-testnet-cirbtc', symbol: 'cirBTC', tokenAddress: '0xf0C4a4CE82A5746AbAAd9425360Ab04fbBA432BF', decimals: 8 },
+]
+
+export type ArcTransferLog = { address: string; data: string; logIndex: string; topics: string[] }
+
+const transferTopic = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'
+
+function tokenAmount(value: bigint, decimals: number) {
+  if (decimals === 0) return value.toString()
+  const scale = 10n ** BigInt(decimals)
+  const fraction = (value % scale).toString().padStart(decimals, '0').replace(/0+$/, '')
+  return fraction ? `${value / scale}.${fraction}` : (value / scale).toString()
+}
+
+export function decodeArcTransferLegs(logs: ArcTransferLog[], walletAddress: string, dynamicTokens: Map<string, TokenDetails> = new Map()) {
+  const byAddress = new Map<string, TokenDetails>()
+  for (const token of dynamicTokens.values()) {
+    if (token.tokenAddress && Number.isInteger(token.decimals)) byAddress.set(token.tokenAddress.toLowerCase(), token)
+  }
+  for (const canonical of arcTestnetCanonicalTokens) {
+    const address = canonical.tokenAddress!.toLowerCase()
+    const dynamic = byAddress.get(address)
+    byAddress.set(address, dynamic ? { ...dynamic, ...canonical } : canonical)
+  }
+  const wallet = walletAddress.toLowerCase()
+  return logs.flatMap((log): OnchainLeg[] => {
+    if (log.topics?.[0]?.toLowerCase() !== transferTopic || log.topics.length < 3 || !/^0x[0-9a-fA-F]+$/.test(log.data)) return []
+    const sourceAddress = `0x${log.topics[1].slice(-40)}`.toLowerCase()
+    const destinationAddress = `0x${log.topics[2].slice(-40)}`.toLowerCase()
+    const token = byAddress.get(log.address.toLowerCase())
+    if (!token?.tokenAddress || !Number.isInteger(token.decimals) || (sourceAddress !== wallet && destinationAddress !== wallet)) return []
+    return [{
+      txHash: '', logIndex: Number.parseInt(log.logIndex, 16), direction: sourceAddress === wallet ? 'out' : 'in',
+      amount: tokenAmount(BigInt(log.data), token.decimals!), tokenId: token.id,
+      tokenAddress: token.tokenAddress, tokenSymbol: token.symbol, tokenDecimals: token.decimals!,
+      sourceAddress, destinationAddress,
+    }]
+  })
+}
+
 export type OnchainLeg = {
   txHash: string
   logIndex: number
