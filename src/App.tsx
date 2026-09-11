@@ -5,6 +5,7 @@ import { autoVerifyInvoicePayment, CirclePaymentResolutionError, resolveCirclePa
 import { bindInvoicePaymentIntent, connectInvoiceWalletConnect, createInvoicePaymentIntent, getArklakePaymentIntentStatus, submitWalletConnectIntent, walletConnectErrorMessage, type InvoicePaymentIntent } from './walletconnect-invoice'
 import type { W3SSdk as CircleW3SSdk } from '@circle-fin/w3s-pw-web-sdk'
 import { arcTestnetChainIdHex, connectExternalWallet, externalUsdcAmount, externalWalletError, readExternalUsdcBalance, submitExternalUsdcPayment, switchExternalWalletToArc, type ExternalWalletProvider } from './external-wallet'
+import { runBoundedVisiblePoll } from './wallet-refresh'
 
 const shellWidth = 'site-shell'
 
@@ -3290,7 +3291,7 @@ function TokenIcon({ symbol, icon }: { symbol: string; icon?: string }) {
   )
 }
 
-function SendUsdcFlow({ origin, wallet, balance, circleAuth, email, onClose, onBalancesRefresh, onCircleAuthRefresh }: { origin: PendingSendDraft['origin']; wallet: ArklakeWalletIdentity | null; balance?: ArklakeTokenBalance; circleAuth: CircleAuthContext | null; email: string; onClose: () => void; onBalancesRefresh: (balances: ArklakeTokenBalance[]) => void; onCircleAuthRefresh: (circleAuth: CircleSessionRefresh) => Promise<boolean> }) {
+function SendUsdcFlow({ origin, wallet, balance, circleAuth, email, onClose, onBalancesRefresh, onCircleAuthRefresh, onTransactionSubmitted }: { origin: PendingSendDraft['origin']; wallet: ArklakeWalletIdentity | null; balance?: ArklakeTokenBalance; circleAuth: CircleAuthContext | null; email: string; onClose: () => void; onBalancesRefresh: (balances: ArklakeTokenBalance[]) => void; onCircleAuthRefresh: (circleAuth: CircleSessionRefresh) => Promise<boolean>; onTransactionSubmitted?: (txHash: string) => void }) {
   const [recipientAddress, setRecipientAddress] = useState('')
   const [amount, setAmount] = useState('')
   const [status, setStatus] = useState<SendStatus>('idle')
@@ -3433,7 +3434,10 @@ function SendUsdcFlow({ origin, wallet, balance, circleAuth, email, onClose, onB
           }
 
           const resultData = (challengeResult as { data?: { txHash?: string; transactionId?: string; id?: string } }).data
-          if (resultData?.txHash) setTxHash(resultData.txHash)
+          if (resultData?.txHash) {
+            setTxHash(resultData.txHash)
+            onTransactionSubmitted?.(resultData.txHash)
+          }
           if (resultData?.transactionId || resultData?.id) setTransactionId(resultData.transactionId || resultData.id || '')
           resolve()
         })
@@ -3741,7 +3745,7 @@ function CircleSigningReauthPanel({ email, onComplete, title = 'Confirming' }: {
   )
 }
 
-function AppWalletPage({ onNavigate, balances, wallet, circleAuth, email, onBalancesRefresh, onCircleAuthRefresh }: { onNavigate: AppNavigateHandler; balances: ArklakeTokenBalance[]; wallet: ArklakeWalletIdentity | null; circleAuth: CircleAuthContext | null; email: string; onBalancesRefresh: (balances: ArklakeTokenBalance[]) => void; onCircleAuthRefresh: (circleAuth: CircleSessionRefresh) => Promise<boolean> }) {
+function AppWalletPage({ onNavigate, balances, wallet, circleAuth, email, onBalancesRefresh, onCircleAuthRefresh, onWalletRefresh }: { onNavigate: AppNavigateHandler; balances: ArklakeTokenBalance[]; wallet: ArklakeWalletIdentity | null; circleAuth: CircleAuthContext | null; email: string; onBalancesRefresh: (balances: ArklakeTokenBalance[]) => void; onCircleAuthRefresh: (circleAuth: CircleSessionRefresh) => Promise<boolean>; onWalletRefresh: () => Promise<ArklakeTokenBalance[] | null> }) {
   const usdcBalance = getUsdcBalance(balances)
   const userFacingBalances = getUserFacingBalances(balances)
   const [walletAction, setWalletAction] = useState<'receive' | 'send' | null>(() => loadPendingSendDraft()?.origin === 'wallet' ? 'send' : null)
@@ -3749,6 +3753,74 @@ function AppWalletPage({ onNavigate, balances, wallet, circleAuth, email, onBala
   const [activityStatus, setActivityStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [selectedActivity, setSelectedActivity] = useState<WalletActivity | null>(null)
   const [activityRefresh, setActivityRefresh] = useState(0)
+  const activitiesRef = useRef<WalletActivity[]>([])
+  const balancesRef = useRef(balances)
+  const activityPollRef = useRef<AbortController | null>(null)
+  const balancePollRef = useRef<AbortController | null>(null)
+  const refreshInFlightRef = useRef(false)
+  const hasActivityBaselineRef = useRef(false)
+  const lastReturnRefreshRef = useRef(0)
+
+  useEffect(() => { balancesRef.current = balances }, [balances])
+
+  const syncActivities = async () => {
+    if (!wallet?.id) return null
+    const response = await fetch('/api/circle/activity-sync', { method: 'POST' })
+    const data = await response.json().catch(() => null) as { activities?: WalletActivity[]; error?: string } | null
+    if (!response.ok || !Array.isArray(data?.activities)) throw new Error(data?.error || 'Activity could not be loaded.')
+    const previousIds = new Set(activitiesRef.current.map((activity) => activity.id))
+    const newConfirmedReceive = hasActivityBaselineRef.current && data.activities.some((activity) => activity.type === 'receive' && activity.status === 'confirmed' && !previousIds.has(activity.id))
+    hasActivityBaselineRef.current = true
+    activitiesRef.current = data.activities
+    setActivities(data.activities)
+    setSelectedActivity((current) => current ? data.activities!.find((activity) => activity.id === current.id) || null : null)
+    setActivityStatus('ready')
+    return { activities: data.activities, newConfirmedReceive }
+  }
+
+  const pollBalanceAfterReceive = (initialAmount = getUsdcBalance(balancesRef.current)?.amount || null) => {
+    balancePollRef.current?.abort()
+    const controller = new AbortController()
+    balancePollRef.current = controller
+    void runBoundedVisiblePoll({
+      intervalMs: 3000,
+      timeoutMs: 60000,
+      signal: controller.signal,
+      isVisible: () => document.visibilityState === 'visible',
+      check: async () => {
+        const next = await onWalletRefresh()
+        if (!next) return false
+        const nextAmount = getUsdcBalance(next)?.amount || null
+        return nextAmount !== initialAmount
+      },
+    }).catch(() => {})
+  }
+
+  const refreshWalletOnce = async () => {
+    if (refreshInFlightRef.current || document.visibilityState !== 'visible') return
+    refreshInFlightRef.current = true
+    try {
+      const balanceBeforeRefresh = getUsdcBalance(balancesRef.current)?.amount || null
+      const result = await syncActivities()
+      await onWalletRefresh()
+      if (result?.newConfirmedReceive) pollBalanceAfterReceive(balanceBeforeRefresh)
+    } finally {
+      refreshInFlightRef.current = false
+    }
+  }
+
+  const pollActivityForTransaction = (txHash: string) => {
+    activityPollRef.current?.abort()
+    const controller = new AbortController()
+    activityPollRef.current = controller
+    void runBoundedVisiblePoll({
+      intervalMs: 5000,
+      timeoutMs: 60000,
+      signal: controller.signal,
+      isVisible: () => document.visibilityState === 'visible',
+      check: async () => Boolean((await syncActivities())?.activities.some((activity) => activity.txHash?.toLowerCase() === txHash.toLowerCase())),
+    }).catch(() => {})
+  }
 
   useEffect(() => {
     if (!wallet?.id) {
@@ -3758,19 +3830,28 @@ function AppWalletPage({ onNavigate, balances, wallet, circleAuth, email, onBala
     }
     let cancelled = false
     setActivityStatus('loading')
-    fetch('/api/circle/activity-sync', { method: 'POST' })
-      .then(async (response) => {
-        const data = await response.json().catch(() => null) as { activities?: WalletActivity[]; error?: string } | null
-        if (!response.ok || !Array.isArray(data?.activities)) throw new Error(data?.error || 'Activity could not be loaded.')
-        if (!cancelled) {
-          setActivities(data.activities)
-          setSelectedActivity((current) => current ? data.activities!.find((activity) => activity.id === current.id) || null : null)
-          setActivityStatus('ready')
-        }
-      })
+    syncActivities()
+      .then((result) => { if (!cancelled && result?.newConfirmedReceive) pollBalanceAfterReceive() })
       .catch(() => { if (!cancelled) setActivityStatus('error') })
     return () => { cancelled = true }
   }, [wallet?.id, activityRefresh])
+
+  useEffect(() => {
+    const refreshOnReturn = () => {
+      const now = Date.now()
+      if (document.visibilityState !== 'visible' || now - lastReturnRefreshRef.current < 1000) return
+      lastReturnRefreshRef.current = now
+      void refreshWalletOnce()
+    }
+    window.addEventListener('focus', refreshOnReturn)
+    document.addEventListener('visibilitychange', refreshOnReturn)
+    return () => {
+      window.removeEventListener('focus', refreshOnReturn)
+      document.removeEventListener('visibilitychange', refreshOnReturn)
+      activityPollRef.current?.abort()
+      balancePollRef.current?.abort()
+    }
+  }, [wallet?.id])
 
   return (
     <AppShell activeItem="Wallet" title="Wallet" subtitle="Your money in Arklake." onNavigate={onNavigate}>
@@ -3823,7 +3904,7 @@ function AppWalletPage({ onNavigate, balances, wallet, circleAuth, email, onBala
       </section>
 
       {walletAction === 'receive' ? <div className="mt-6"><ReceiveFlow wallet={wallet} onClose={() => setWalletAction(null)} /></div> : null}
-      {walletAction === 'send' ? <div className="mt-6"><SendUsdcFlow origin="wallet" wallet={wallet} balance={usdcBalance} circleAuth={circleAuth} email={email} onClose={() => setWalletAction(null)} onBalancesRefresh={onBalancesRefresh} onCircleAuthRefresh={onCircleAuthRefresh} /></div> : null}
+      {walletAction === 'send' ? <div className="mt-6"><SendUsdcFlow origin="wallet" wallet={wallet} balance={usdcBalance} circleAuth={circleAuth} email={email} onClose={() => setWalletAction(null)} onBalancesRefresh={onBalancesRefresh} onCircleAuthRefresh={onCircleAuthRefresh} onTransactionSubmitted={pollActivityForTransaction} /></div> : null}
 
       <section className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
         <div className="rounded-[2rem] border border-lake-border bg-surface p-6 shadow-sm">
@@ -5147,7 +5228,15 @@ export default function App() {
   }
 
   if (currentPath === '/app/wallet') {
-    return <AppWalletPage onNavigate={handleAppNavigate} balances={arklakeBalances} wallet={arklakeWallet} circleAuth={circleAuth} email={arklakeEmail} onBalancesRefresh={setArklakeBalances} onCircleAuthRefresh={handleCircleAuthRefresh} />
+    return <AppWalletPage onNavigate={handleAppNavigate} balances={arklakeBalances} wallet={arklakeWallet} circleAuth={circleAuth} email={arklakeEmail} onBalancesRefresh={setArklakeBalances} onCircleAuthRefresh={handleCircleAuthRefresh} onWalletRefresh={async () => {
+      try {
+        const response = await fetch(arklakeSessionEndpoint, { credentials: 'include' })
+        const data = await response.json() as { authenticated?: boolean; balances?: ArklakeTokenBalance[] }
+        if (!response.ok || !data.authenticated || !Array.isArray(data.balances)) return null
+        setArklakeBalances(data.balances)
+        return data.balances
+      } catch { return null }
+    }} />
   }
 
   if (currentPath === '/app/swap') {
