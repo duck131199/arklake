@@ -90,13 +90,6 @@ const getTransferAmount = (body: unknown) => {
   return body.amount
 }
 
-const getReferenceId = (body: unknown) => {
-  if (!isRecord(body) || typeof body.referenceId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(body.referenceId)) {
-    throw new Error('Invalid referenceId')
-  }
-  return body.referenceId
-}
-
 const toUsdcUnits = (amount: string) => {
   const [whole, fraction = ''] = amount.split('.')
   return BigInt(whole) * 1_000_000n + BigInt(fraction.padEnd(6, '0'))
@@ -175,7 +168,7 @@ const createTransferTransaction = async (userToken: string, body: unknown) => {
   const amount = getTransferAmount(body)
   const isInvoicePayment = isRecord(body) && typeof body.intentId === 'string' && typeof body.intentToken === 'string'
   const intentCredentials = isInvoicePayment ? getIntentCredentials(body) : null
-  const referenceId = intentCredentials?.intentId || getReferenceId(body)
+  const referenceId = intentCredentials?.intentId
 
   const walletsResult = await listWallets(userToken)
   if (!walletsResult.ok || !isRecord(walletsResult.payload) || !Array.isArray(walletsResult.payload.wallets)) {
@@ -227,7 +220,7 @@ const createTransferTransaction = async (userToken: string, body: unknown) => {
       amounts: [amount],
       tokenId: canonicalUsdcBalance.token.id,
       feeLevel: 'MEDIUM',
-      refId: referenceId,
+      ...(referenceId ? { refId: referenceId } : {}),
     }),
   })
 

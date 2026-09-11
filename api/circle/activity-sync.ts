@@ -1,8 +1,9 @@
 import crypto from 'node:crypto'
 import { createClient } from '@supabase/supabase-js'
 import { normalizeCircleTransactions, type CircleTransaction, type OnchainLeg, type TokenDetails } from '../../server/circle/activity-core.js'
-import { activityEmail, notificationBelongsToAccount, notificationIdempotencyKey, transactionEmailEnabled, type EmailActivity } from '../../server/circle/activity-email.js'
+import { activityEmail, activityEmailMaySend, notificationBelongsToAccount, notificationIdempotencyKey, transactionEmailActivationTime, transactionEmailEnabled, type EmailActivity } from '../../server/circle/activity-email.js'
 import { shouldSuppressGenericActivityEmail } from '../../server/circle/activity-email-suppression.js'
+import { arcTestnetChainIdHex, counterpartyActivityType, internalCounterpartyAddress, internalTransferUsdcAddress, reconciledDedupKey, reconciledLegKey, verifyInternalUsdcTransfer, type ArcReceipt } from '../../server/circle/internal-transfer.js'
 import { processInvoiceEmailOutbox } from '../../server/invoice-email.js'
 
 type VercelRequest = { method?: string; headers: { cookie?: string } }
@@ -39,14 +40,14 @@ function retryAt(attempts: number) {
   return new Date(Date.now() + Math.min(60, 2 ** Math.min(attempts, 5)) * 60_000).toISOString()
 }
 
-async function deliverActivityEmails(supabase: ReturnType<typeof supabaseClient>, accountId: string) {
+async function deliverActivityEmails(supabase: ReturnType<typeof supabaseClient>, accountId: string, enabledAt: number) {
   const { data: account } = await supabase.from('arklake_accounts').select('email').eq('id', accountId).maybeSingle<{ email: string }>()
   if (!account?.email) return { sent: 0, failed: 0 }
   const now = new Date().toISOString()
   const stale = new Date(Date.now() - 5 * 60_000).toISOString()
   const { data: queued } = await supabase.from('wallet_activity_notification_outbox')
     .select('id,account_id,activity_id,status,attempts').eq('account_id', accountId)
-    .or(`and(status.in.(pending,failed),next_attempt_at.lte.${now}),and(status.eq.sending,updated_at.lte.${stale})`)
+    .or(`and(status.eq.pending,attempts.eq.0),and(status.eq.failed,next_attempt_at.lte.${now}),and(status.eq.sending,updated_at.lte.${stale})`)
     .order('created_at', { ascending: true }).limit(10)
   let sent = 0
   let failed = 0
@@ -61,6 +62,12 @@ async function deliverActivityEmails(supabase: ReturnType<typeof supabaseClient>
         .select('id,activity_type,status,occurred_at,confirmed_at,blockchain,tx_hash,source_address,destination_address,raw_circle')
         .eq('id', item.activity_id).eq('account_id', accountId).eq('status', 'confirmed').maybeSingle()
       if (!activity) throw new Error('Confirmed wallet activity was not found')
+      if (!activityEmailMaySend(activity.confirmed_at, enabledAt)) {
+        await supabase.from('wallet_activity_notification_outbox').update({
+          status: 'suppressed', last_error: 'Activity predates transaction email activation', updated_at: new Date().toISOString(),
+        }).eq('id', item.id).eq('account_id', accountId).eq('status', 'sending')
+        continue
+      }
       if ((activity.activity_type === 'send' || activity.activity_type === 'receive') && activity.tx_hash) {
         const { data: invoiceIntent, error: intentError } = await supabase.from('invoice_payment_intents')
           .select('id').eq('tx_hash', activity.tx_hash.toLowerCase()).limit(1).maybeSingle<{ id: string }>()
@@ -222,6 +229,82 @@ async function swapReceiptLegs(transactions: CircleTransaction[], walletAddress:
   return new Map(entries)
 }
 
+async function arcReceipt(txHash: string) {
+  const [chainResponse, receiptResponse] = await Promise.all([
+    fetch(arcRpcUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] }), signal: AbortSignal.timeout(15000) }),
+    fetch(arcRpcUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'eth_getTransactionReceipt', params: [txHash] }), signal: AbortSignal.timeout(15000) }),
+  ])
+  const chain = await chainResponse.json().catch(() => null) as { result?: string } | null
+  const receipt = await receiptResponse.json().catch(() => null) as { result?: ArcReceipt | null } | null
+  if (!chainResponse.ok || chain?.result?.toLowerCase() !== arcTestnetChainIdHex || !receiptResponse.ok) return null
+  return receipt?.result || null
+}
+
+async function notificationStatus(supabase: ReturnType<typeof supabaseClient>, activity: { activityType: string; txHash: string | null; confirmedAt: string | null }, enabledAt: number) {
+  const historical = !activityEmailMaySend(activity.confirmedAt, enabledAt)
+  if (historical) return { status: 'suppressed', last_error: 'Activity predates transaction email activation' }
+  if ((activity.activityType === 'send' || activity.activityType === 'receive') && activity.txHash) {
+    const { data, error } = await supabase.from('invoice_payment_intents').select('id').eq('tx_hash', activity.txHash.toLowerCase()).limit(1).maybeSingle<{ id: string }>()
+    if (error) throw new Error('Invoice payment correlation could not be checked')
+    if (data) return { status: 'suppressed', last_error: 'Invoice payment notification is sent by the invoice email flow' }
+  }
+  return { status: 'pending' }
+}
+
+async function reconcileInternalTransfers(supabase: ReturnType<typeof supabaseClient>, currentAccountId: string, activities: ReturnType<typeof normalizeCircleTransactions>, enabledAt: number) {
+  const affectedAccounts = new Set([currentAccountId])
+  for (const activity of activities) {
+    const address = internalCounterpartyAddress(activity)
+    if (!address || activity.status !== 'confirmed' || !activity.txHash) continue
+    const { data: counterpartMatches, error: walletError } = await supabase.from('arklake_wallets')
+      .select('account_id,circle_wallet_id,address').ilike('address', address).eq('blockchain', 'ARC-TESTNET').eq('account_type', 'SCA')
+      .neq('account_id', currentAccountId).limit(2).returns<Array<{ account_id: string; circle_wallet_id: string; address: string }>>()
+    if (walletError) throw new Error('Internal counterparty lookup failed')
+    const counterpart = counterpartMatches?.length === 1 ? counterpartMatches[0] : null
+    if (!counterpart || counterpart.address.toLowerCase() !== address) continue
+    const receipt = await arcReceipt(activity.txHash)
+    const transfer = verifyInternalUsdcTransfer(activity, receipt)
+    const activityType = counterpartyActivityType(activity, counterpart.address)
+    if (!transfer || !activityType) continue
+    const dedupKey = reconciledDedupKey(counterpart.circle_wallet_id, activity.blockchain, activity.txHash)
+    const { data: inserted, error: insertError } = await supabase.from('wallet_activities').upsert({
+      account_id: counterpart.account_id, circle_wallet_id: counterpart.circle_wallet_id, dedup_key: dedupKey,
+      circle_transaction_id: null, circle_transaction_ids: [], blockchain: activity.blockchain, tx_hash: activity.txHash.toLowerCase(),
+      activity_type: activityType, status: 'confirmed', circle_state: 'CONFIRMED', operation: 'TRANSFER',
+      source_address: transfer.sourceAddress, destination_address: transfer.destinationAddress,
+      occurred_at: activity.occurredAt, confirmed_at: activity.confirmedAt, raw_circle: [], updated_at: new Date().toISOString(),
+    }, { onConflict: 'dedup_key', ignoreDuplicates: true }).select('id')
+    if (insertError) throw new Error('Internal counterparty activity could not be saved')
+    let activityId = inserted?.[0]?.id as string | undefined
+    if (activityId) {
+      const { error: legError } = await supabase.from('wallet_activity_legs').upsert({
+        activity_id: activityId, leg_key: reconciledLegKey(counterpart.circle_wallet_id, activity.blockchain, activity.txHash, transfer.logIndex),
+        direction: activityType === 'send' ? 'out' : 'in', amount: transfer.amount, token_id: null,
+        token_address: internalTransferUsdcAddress, token_symbol: 'USDC', token_decimals: 6,
+        source_address: transfer.sourceAddress, destination_address: transfer.destinationAddress, log_index: transfer.logIndex, updated_at: new Date().toISOString(),
+      }, { onConflict: 'leg_key' })
+      if (legError) throw new Error('Internal counterparty activity leg could not be saved')
+    } else {
+      const { data: existing, error: existingError } = await supabase.from('wallet_activities').select('id').eq('dedup_key', dedupKey).maybeSingle<{ id: string }>()
+      if (existingError || !existing) throw new Error('Internal counterparty activity could not be loaded')
+      activityId = existing.id
+      const { error: confirmError } = await supabase.from('wallet_activities').update({
+        status: 'confirmed', circle_state: 'CONFIRMED', tx_hash: activity.txHash.toLowerCase(),
+        source_address: transfer.sourceAddress, destination_address: transfer.destinationAddress,
+        confirmed_at: activity.confirmedAt, updated_at: new Date().toISOString(),
+      }).eq('id', activityId).eq('account_id', counterpart.account_id).eq('circle_wallet_id', counterpart.circle_wallet_id)
+      if (confirmError) throw new Error('Internal counterparty activity could not be confirmed')
+    }
+    const state = await notificationStatus(supabase, { activityType, txHash: activity.txHash, confirmedAt: activity.confirmedAt }, enabledAt)
+    const { error: outboxError } = await supabase.from('wallet_activity_notification_outbox').upsert({
+      account_id: counterpart.account_id, activity_id: activityId, channel: 'email', ...state,
+    }, { onConflict: 'activity_id,channel', ignoreDuplicates: true })
+    if (outboxError) throw new Error('Internal counterparty notification could not be enqueued')
+    affectedAccounts.add(counterpart.account_id)
+  }
+  return affectedAccounts
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
   try {
@@ -259,6 +342,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const receiptLegs = await swapReceiptLegs(listed.transactions, wallet.address, tokens)
     const activities = normalizeCircleTransactions(listed.transactions, tokens, wallet.circle_wallet_id, receiptLegs)
     const emailEnabled = transactionEmailEnabled(process.env.ARKLAKE_TRANSACTION_EMAIL_ENABLED)
+    const emailEnabledAt = transactionEmailActivationTime(process.env.ARKLAKE_TRANSACTION_EMAIL_ENABLED_AT)
+    const emailDeliveryEnabled = emailEnabled && emailEnabledAt !== null
     if (activities.length) {
       const rows = activities.map((activity) => ({
         account_id: session.account_id, circle_wallet_id: wallet.circle_wallet_id, dedup_key: activity.dedupKey,
@@ -278,8 +363,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       })))
       const { error: legsError } = await supabase.from('wallet_activity_legs').upsert(legs, { onConflict: 'leg_key' })
       if (legsError) throw new Error('Unable to save wallet activity legs')
+      const nativeActivityIds = [...activityIds.values()]
+      if (nativeActivityIds.length) {
+        const { error: cleanupError } = await supabase.from('wallet_activity_legs').delete().in('activity_id', nativeActivityIds).like('leg_key', 'reconciled:%')
+        if (cleanupError) throw new Error('Unable to replace reconciled activity legs')
+      }
       const invoicePaymentHashes = new Set<string>()
-      if (emailEnabled) {
+      if (emailDeliveryEnabled) {
         const hashes = activities.flatMap((activity) => activity.status === 'confirmed' && (activity.activityType === 'send' || activity.activityType === 'receive') && activity.txHash ? [activity.txHash.toLowerCase()] : [])
         if (hashes.length) {
           const { data: intents, error: intentsError } = await supabase.from('invoice_payment_intents').select('tx_hash').in('tx_hash', [...new Set(hashes)])
@@ -287,12 +377,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           for (const intent of intents || []) if (typeof intent.tx_hash === 'string') invoicePaymentHashes.add(intent.tx_hash.toLowerCase())
         }
       }
-      const confirmedIds = emailEnabled ? saved.flatMap((row: { id: string; dedup_key: string }) => {
+      const confirmedIds = emailDeliveryEnabled ? saved.flatMap((row: { id: string; dedup_key: string }) => {
         const activity = activities.find((candidate) => candidate.dedupKey === row.dedup_key)
         if (activity?.status !== 'confirmed') return []
-        const suppressed = shouldSuppressGenericActivityEmail(activity.activityType, activity.txHash, invoicePaymentHashes)
+        const historical = !activityEmailMaySend(activity.confirmedAt, emailEnabledAt)
+        const invoicePayment = shouldSuppressGenericActivityEmail(activity.activityType, activity.txHash, invoicePaymentHashes)
+        const suppressed = historical || invoicePayment
         return [{ account_id: session.account_id, activity_id: row.id, channel: 'email', status: suppressed ? 'suppressed' : 'pending',
-          ...(suppressed ? { last_error: 'Invoice payment notification is sent by the invoice email flow' } : {}) }]
+          ...(suppressed ? { last_error: historical ? 'Activity predates transaction email activation' : 'Invoice payment notification is sent by the invoice email flow' } : {}) }]
       }) : []
       if (confirmedIds.length) {
         const { error: outboxError } = await supabase.from('wallet_activity_notification_outbox')
@@ -300,7 +392,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (outboxError) console.error('ARKLAKE_ACTIVITY_EMAIL_ENQUEUE_FAILED', outboxError.message)
       }
     }
-    const notifications = emailEnabled ? await deliverActivityEmails(supabase, session.account_id).catch((error) => {
+    const affectedAccounts = emailDeliveryEnabled ? await reconcileInternalTransfers(supabase, session.account_id, activities, emailEnabledAt) : new Set([session.account_id])
+    const notifications = emailDeliveryEnabled ? await Promise.all([...affectedAccounts].map((accountId) => deliverActivityEmails(supabase, accountId, emailEnabledAt))).then((results) => ({
+      enabled: true, sent: results.reduce((sum, result) => sum + result.sent, 0), failed: results.reduce((sum, result) => sum + result.failed, 0),
+    })).catch((error) => {
       console.error('ARKLAKE_ACTIVITY_EMAIL_DELIVERY_FAILED', error instanceof Error ? error.message : 'Unknown error')
       return { enabled: true, sent: 0, failed: 1 }
     }) : { enabled: false, sent: 0, failed: 0 }

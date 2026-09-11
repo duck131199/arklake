@@ -15,7 +15,7 @@ const emailSource = stripTypeScriptTypes(readFileSync(new URL('../server/circle/
 const emailModule = new vm.SourceTextModule(emailSource, { context })
 await emailModule.link(() => { throw new Error('Unexpected import') })
 await emailModule.evaluate()
-const { activityEmail, notificationBelongsToAccount, notificationIdempotencyKey, transactionEmailEnabled } = emailModule.namespace
+const { activityEmail, activityEmailMaySend, notificationBelongsToAccount, notificationIdempotencyKey, transactionEmailActivationTime, transactionEmailEnabled } = emailModule.namespace
 const base = { walletId: 'wallet-1', blockchain: 'ARC-TESTNET', state: 'CONFIRMED', operation: 'TRANSFER', createDate: '2026-09-07T01:00:00Z', updateDate: '2026-09-07T01:01:00Z' }
 
 test('classifies real one-way transfers as receive and send', () => {
@@ -87,7 +87,20 @@ test('dedup keys and leg keys remain stable across repeated syncs', () => {
 
 test('transaction email content matches receive, send, and swap movements', () => {
   const common = { id: 'activity-1', status: 'confirmed', occurredAt: '2026-09-07T01:00:00Z', confirmedAt: '2026-09-07T01:01:00Z', blockchain: 'ARC-TESTNET', txHash: '0xabc' }
-  assert.match(activityEmail({ ...common, type: 'receive', legs: [{ direction: 'in', amount: '2.5', symbol: 'USDC' }] }).text, /You received 2.5 USDC/)
+  const receive = activityEmail({ ...common, type: 'receive', sourceAddress: '0x1234567890abcdef', destinationAddress: '0xrecipient', legs: [{ direction: 'in', amount: '2.5', symbol: 'USDC', sourceAddress: '0x1234567890abcdef', destinationAddress: '0xrecipient' }] })
+  assert.equal(receive.subject, 'You received 2.5 USDC')
+  assert.match(receive.text, /^You received 2\.5 USDC\n\nYour transfer has been confirmed\./)
+  assert.match(receive.text, /Amount received: 2\.5 USDC/)
+  assert.match(receive.text, /From: 0x1234…cdef/)
+  assert.match(receive.text, /Confirmed at: .* UTC/)
+  assert.match(receive.text, /Network: Arc Testnet/)
+  assert.match(receive.text, /Transaction: 0xabc/)
+  assert.match(receive.text, /View on Arcscan: https:\/\/testnet\.arcscan\.app\/tx\/0xabc/)
+  assert.doesNotMatch(receive.text, /0xrecipient/)
+  assert.match(receive.html, /https:\/\/arklake\.site\/brand\/arklake-mark-trimmed\.png/)
+  const receiveWithoutSymbol = activityEmail({ ...common, type: 'receive', legs: [{ direction: 'in', amount: '2.5', symbol: null }] })
+  assert.equal(receiveWithoutSymbol.subject, 'You received 2.5')
+  assert.doesNotMatch(receiveWithoutSymbol.text, /token/)
   const send = activityEmail({ ...common, type: 'send', legs: [{ direction: 'out', amount: '1', symbol: 'EURC' }] })
   assert.equal(send.subject, '1 EURC sent successfully')
   assert.match(send.text, /^EURC sent successfully/)
@@ -109,8 +122,28 @@ test('transaction email feature flag is off by default and only explicit true en
   assert.equal(transactionEmailEnabled('TRUE'), false)
   assert.equal(transactionEmailEnabled('true'), true)
   const syncSource = readFileSync(new URL('../api/circle/activity-sync.ts', import.meta.url), 'utf8')
-  assert.match(syncSource, /const confirmedIds = emailEnabled \?/)
-  assert.match(syncSource, /const notifications = emailEnabled \?/)
+  assert.match(syncSource, /const confirmedIds = emailDeliveryEnabled \?/)
+  assert.match(syncSource, /const notifications = emailDeliveryEnabled \?/)
+})
+
+test('transaction email activation cutoff suppresses history and fails closed', () => {
+  const cutoff = transactionEmailActivationTime('2026-09-11T00:00:00.000Z')
+  assert.equal(cutoff, Date.parse('2026-09-11T00:00:00.000Z'))
+  assert.equal(transactionEmailActivationTime(undefined), null)
+  assert.equal(transactionEmailActivationTime('not-a-date'), null)
+  assert.equal(activityEmailMaySend('2026-09-10T23:59:59.999Z', cutoff), false)
+  assert.equal(activityEmailMaySend('2026-09-11T00:00:00.000Z', cutoff), true)
+  assert.equal(activityEmailMaySend('2026-09-11T00:00:01.000Z', cutoff), true)
+  assert.equal(activityEmailMaySend(null, cutoff), false)
+  assert.equal(activityEmailMaySend('2026-09-11T00:00:01.000Z', null), false)
+  const syncSource = readFileSync(new URL('../api/circle/activity-sync.ts', import.meta.url), 'utf8')
+  assert.match(syncSource, /emailEnabled && emailEnabledAt !== null/)
+  assert.match(syncSource, /historical = !activityEmailMaySend\(activity\.confirmedAt, emailEnabledAt\)/)
+  assert.match(syncSource, /!activityEmailMaySend\(activity\.confirmed_at, enabledAt\)[\s\S]*status: 'suppressed'/)
+  const migration = readFileSync(new URL('../supabase/migrations/202609110001_transaction_email_activation.sql', import.meta.url), 'utf8')
+  assert.match(migration, /outbox\.status in \('pending', 'failed', 'sending'\)/)
+  assert.match(migration, /activity\.confirmed_at < transaction_timestamp\(\)/)
+  assert.doesNotMatch(migration, /outbox\.status\s*=\s*'sent'/)
 })
 
 test('notification jobs are isolated to their owning account', () => {
@@ -118,6 +151,16 @@ test('notification jobs are isolated to their owning account', () => {
   assert.equal(notificationBelongsToAccount('account-b', 'account-a'), false)
   const syncSource = readFileSync(new URL('../api/circle/activity-sync.ts', import.meta.url), 'utf8')
   assert.match(syncSource, /select\('id,account_id,activity_id,status,attempts'\)\.eq\('account_id', accountId\)/)
-  assert.equal((syncSource.match(/\.eq\('account_id', accountId\)/g) || []).length, 6)
+  assert.equal((syncSource.match(/\.eq\('account_id', accountId\)/g) || []).length, 7)
   assert.match(syncSource, /status: 'suppressed'[\s\S]*\.eq\('id', item\.id\)\.eq\('account_id', accountId\)\.eq\('status', 'sending'\)/)
+})
+
+test('activity email worker claims fresh jobs immediately and preserves retry recovery timing', () => {
+  const syncSource = readFileSync(new URL('../api/circle/activity-sync.ts', import.meta.url), 'utf8')
+  assert.match(syncSource, /and\(status\.eq\.pending,attempts\.eq\.0\)/)
+  assert.match(syncSource, /and\(status\.eq\.failed,next_attempt_at\.lte\.\$\{now\}\)/)
+  assert.match(syncSource, /and\(status\.eq\.sending,updated_at\.lte\.\$\{stale\}\)/)
+  assert.doesNotMatch(syncSource, /status\.in\.\(pending,failed\),next_attempt_at/)
+  assert.match(syncSource, /shouldSuppressGenericActivityEmail\(activity\.activityType, activity\.txHash, invoicePaymentHashes\)/)
+  assert.match(syncSource, /status: suppressed \? 'suppressed' : 'pending'/)
 })

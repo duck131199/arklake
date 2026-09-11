@@ -23,6 +23,14 @@ test('attempt and Circle challenge are persisted before SDK execution', () => {
   assert.ok(request > -1 && execute > request)
 })
 
+test('regular Send omits refId while Pay with Arklake uses its intent ID', () => {
+  assert.doesNotMatch(api, /getReferenceId/)
+  assert.match(api, /const referenceId = intentCredentials\?\.intentId/)
+  assert.match(api, /\.\.\.\(referenceId \? \{ refId: referenceId \} : \{\}\)/)
+  assert.match(api, /let circleIdempotencyKey: string = crypto\.randomUUID\(\)/)
+  assert.match(api, /circleIdempotencyKey = start\.idempotency_key/)
+})
+
 test('reload resumes persisted recovery and cannot render a fresh submit attempt', () => {
   assert.match(app, /loadArklakePaymentAttempt\(invoiceId\)/)
   assert.match(app, /getArklakePaymentIntentStatus\(intent\)/)
