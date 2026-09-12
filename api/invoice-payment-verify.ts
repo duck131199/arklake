@@ -7,7 +7,7 @@ type VercelRequest = { method?: string; body?: unknown }
 type VercelResponse = { status: (code: number) => VercelResponse; json: (body: object) => unknown; setHeader: (name: string, value: string) => void }
 type InvoiceRow = {
   id: string; account_id: string; receiving_circle_wallet_id: string; receiving_wallet_address: string
-  amount: string | number; asset: string; status: 'active' | 'paid' | 'expired'; created_at: string; expires_at: string; payment_tx_hash: string | null
+  invoice_number: string; memo: string | null; amount: string | number; asset: string; status: 'active' | 'paid' | 'expired'; created_at: string; expires_at: string; payment_tx_hash: string | null
 }
 
 const rpcUrl = 'https://rpc.testnet.arc.network'
@@ -35,6 +35,10 @@ const verificationMessage: Record<string, string> = {
   'wrong-token': 'No canonical USDC transfer was found in this transaction.',
   'wrong-recipient': 'The USDC transfer was sent to another recipient.',
   'wrong-amount': 'The USDC transfer amount does not match this invoice.',
+  'wrong-payer': 'The USDC payment was made by another wallet.',
+  'missing-invoice-event': 'The on-chain invoice payment proof was not found.',
+  'wrong-reference': 'The on-chain payment reference does not match this invoice.',
+  'wrong-memo': 'The on-chain Memo does not match this invoice Description.',
   'outside-invoice-window': 'This transaction was not made while the invoice was active.',
 }
 const retryableVerification = new Set(['missing-receipt', 'pending-receipt', 'insufficient-confirmations'])
@@ -59,12 +63,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!/^[0-9a-f-]{36}$/i.test(intentId) || intentToken.length < 32) return res.status(400).json({ error: 'Payment intent credentials are required.' })
     const publicTokenHash = createHash('sha256').update(intentToken).digest('hex')
     const { data: intent, error: intentError } = await supabase.from('invoice_payment_intents')
-      .select('id,status').eq('id', intentId).eq('invoice_id', invoiceId).eq('public_token_hash', publicTokenHash).eq('tx_hash', txHash)
-      .maybeSingle<{ id: string; status: string }>()
+      .select('id,status,payment_rail,payer_wallet_id').eq('id', intentId).eq('invoice_id', invoiceId).eq('public_token_hash', publicTokenHash).eq('tx_hash', txHash)
+      .maybeSingle<{ id: string; status: string; payment_rail: string; payer_wallet_id: string | null }>()
     if (intentError) throw intentError
     if (!intent) return res.status(409).json({ error: 'This transaction is not bound to this payment intent.' })
     const { data: invoice, error } = await supabase.from('invoices')
-      .select('id,account_id,receiving_circle_wallet_id,receiving_wallet_address,amount,asset,status,created_at,expires_at,payment_tx_hash')
+      .select('id,account_id,invoice_number,memo,receiving_circle_wallet_id,receiving_wallet_address,amount,asset,status,created_at,expires_at,payment_tx_hash')
       .eq('id', invoiceId).maybeSingle<InvoiceRow>()
     if (error) throw error
     if (!invoice) return res.status(404).json({ error: 'Invoice not found.' })
@@ -83,9 +87,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     ])
     const receipt = receiptValue as InvoicePaymentReceipt | null
     const block = receipt?.blockNumber ? await rpc('eth_getBlockByNumber', [receipt.blockNumber, false]) as { timestamp?: string } | null : null
+    let arklakeProof: { payerAddress: string; paymentReference: string; memo: string } | undefined
+    if (intent.payment_rail === 'arklake') {
+      if (!intent.payer_wallet_id) return res.status(409).json({ error: 'This Pay with Arklake attempt has no bound payer wallet.' })
+      const { data: payerWallet, error: payerWalletError } = await supabase.from('arklake_wallets')
+        .select('address').eq('circle_wallet_id', intent.payer_wallet_id).eq('blockchain', 'ARC-TESTNET').eq('account_type', 'SCA')
+        .maybeSingle<{ address: string }>()
+      if (payerWalletError) throw payerWalletError
+      if (!payerWallet) return res.status(409).json({ error: 'The Pay with Arklake payer wallet could not be verified.' })
+      arklakeProof = { payerAddress: payerWallet.address, paymentReference: invoice.invoice_number, memo: invoice.memo || '' }
+    }
     const verified = verifyInvoicePaymentReceipt({
       chainId: String(chainId || ''), latestBlock: String(latestBlock || ''), blockTimestamp: String(block?.timestamp || ''), receipt,
       invoice: { amount: String(invoice.amount), asset: invoice.asset, recipientAddress: invoice.receiving_wallet_address, createdAt: invoice.created_at, expiresAt: invoice.expires_at },
+      arklakeProof,
     })
     if (!verified.ok) {
       await supabase.from('invoice_payment_intents').update({ status: retryableVerification.has(verified.reason) ? 'confirming' : 'failed', updated_at: new Date().toISOString() }).eq('id', intentId)

@@ -25,7 +25,7 @@ test('new payer wallet provisioning waits for the wallet instead of rejecting a 
   assert.match(app, /Circle wallet provisioning is still in progress\. Please continue in a moment\./)
 })
 
-test('Pay with Arklake reuses Circle transfer and only the strict verifier can mark Paid', () => {
+test('Pay with Arklake preserves the current UI and only the strict verifier can mark Paid', () => {
   assert.match(app, /action: 'createTransferTransaction'/)
   assert.match(app, /Approve and submit payment/)
   assert.match(app, /await confirmArklakePayment\(arklakePaymentIntent, txHash\)/)

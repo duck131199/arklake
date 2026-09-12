@@ -1,14 +1,17 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { encodeAbiParameters, keccak256, stringToHex } from 'viem'
 import {
   erc20TransferTopic,
   invoicePaymentChainId,
   invoicePaymentUsdcAddress,
+  invoicePaymentEventTopic,
   invoiceUsdcBaseUnits,
   normalizePaymentTxHash,
   verifyInvoicePaymentReceipt,
 } from '../server/invoice-payment-verify-core.ts'
+import { arklakeInvoicePaymentV2Address, invoicePaymentEventDataAbi } from '../server/invoice-payment-contract.ts'
 
 const recipient = '0xd94074edb1da4c98959d455172beb58e4400324f'
 const payer = '0xb1f9ee64333564050964241688899166307d446e'
@@ -17,6 +20,13 @@ const transfer = ({ token = invoicePaymentUsdcAddress, to = recipient, amount = 
   address: token,
   topics: [erc20TransferTopic, topic(payer), topic(to)],
   data: `0x${amount.toString(16).padStart(64, '0')}`,
+})
+const reference = 'ARK-20260912-B1C18C96'
+const memo = 'Test memo'
+const invoiceEvent = ({ eventPayer = payer, eventRecipient = recipient, token = invoicePaymentUsdcAddress, amount = 1_000_000n, eventReference = reference, eventMemo = memo } = {}) => ({
+  address: arklakeInvoicePaymentV2Address,
+  topics: [invoicePaymentEventTopic, keccak256(stringToHex(eventReference)), topic(eventPayer), topic(eventRecipient)],
+  data: encodeAbiParameters(invoicePaymentEventDataAbi, [token, amount, eventReference, eventMemo]),
 })
 const valid = (overrides = {}) => verifyInvoicePaymentReceipt({
   chainId: `0x${invoicePaymentChainId.toString(16)}`,
@@ -27,6 +37,11 @@ const valid = (overrides = {}) => verifyInvoicePaymentReceipt({
     transfer(),
   ] },
   invoice: { amount: '1', asset: 'USDC', recipientAddress: recipient, createdAt: '2026-09-08T00:00:00.000Z', expiresAt: '2026-09-15T00:00:00.000Z' },
+  ...overrides,
+})
+const validArklake = (overrides = {}) => valid({
+  receipt: { status: '0x1', blockNumber: '0x64', logs: [transfer(), invoiceEvent()] },
+  arklakeProof: { payerAddress: payer, paymentReference: reference, memo },
   ...overrides,
 })
 
@@ -65,6 +80,17 @@ test('rejects historical transfers and sums all canonical USDC sent to the recip
   assert.deepEqual(valid({ receipt: { status: '0x1', blockNumber: '0x64', logs: [transfer(), transfer({ amount: 1n })] } }), { ok: false, reason: 'wrong-amount' })
 })
 
+test('Pay with Arklake requires the exact V2 InvoicePayment proof and payer transfer', () => {
+  assert.equal(validArklake().ok, true)
+  assert.deepEqual(validArklake({ receipt: { status: '0x1', blockNumber: '0x64', logs: [transfer()] } }), { ok: false, reason: 'missing-invoice-event' })
+  assert.deepEqual(validArklake({ receipt: { status: '0x1', blockNumber: '0x64', logs: [transfer(), invoiceEvent({ eventReference: `${reference}-BAD` })] } }), { ok: false, reason: 'wrong-reference' })
+  assert.deepEqual(validArklake({ receipt: { status: '0x1', blockNumber: '0x64', logs: [transfer(), invoiceEvent({ eventMemo: 'Wrong memo' })] } }), { ok: false, reason: 'wrong-memo' })
+  assert.deepEqual(validArklake({ arklakeProof: { payerAddress: '0x3333333333333333333333333333333333333333', paymentReference: reference, memo } }), { ok: false, reason: 'wrong-payer' })
+  assert.deepEqual(validArklake({ receipt: { status: '0x1', blockNumber: '0x64', logs: [transfer(), invoiceEvent({ eventRecipient: '0x4444444444444444444444444444444444444444' })] } }), { ok: false, reason: 'wrong-recipient' })
+  assert.deepEqual(validArklake({ receipt: { status: '0x1', blockNumber: '0x64', logs: [transfer(), invoiceEvent({ token: '0x5555555555555555555555555555555555555555' })] } }), { ok: false, reason: 'wrong-token' })
+  assert.deepEqual(validArklake({ receipt: { status: '0x1', blockNumber: '0x64', logs: [transfer(), invoiceEvent({ amount: 999_999n })] } }), { ok: false, reason: 'wrong-amount' })
+})
+
 test('API verifies on-chain before invoking the atomic Paid transition', () => {
   const api = readFileSync(new URL('../api/invoice-payment-verify.ts', import.meta.url), 'utf8')
   const verification = api.indexOf('const verified = verifyInvoicePaymentReceipt')
@@ -74,6 +100,8 @@ test('API verifies on-chain before invoking the atomic Paid transition', () => {
   assert.match(api, /rpc\('eth_getTransactionReceipt'/)
   assert.match(api, /rpc\('eth_blockNumber'\)/)
   assert.match(api, /rpc\('eth_getBlockByNumber'/)
+  assert.match(api, /payment_rail === 'arklake'/)
+  assert.match(api, /paymentReference: invoice\.invoice_number, memo: invoice\.memo \|\| ''/)
   assert.doesNotMatch(api, /wallet balance|activity-sync|createTransferTransaction/i)
 })
 
