@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex,nofollow" />
+    <title>Arklake Prototype 0 Runner</title>
+    <style>
+      :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background:#102724; color:#e9f4f1 }
+      body { margin:0; min-height:100vh; display:grid; place-items:center; padding:32px; box-sizing:border-box }
+      main { width:min(720px,100%); background:#151b1a; border:1px solid #46615d; border-radius:24px; padding:28px; box-sizing:border-box }
+      h1 { margin:0 0 8px; font-size:28px } h2 { margin:26px 0 12px; font-size:18px }
+      p { color:#b7c7c3; line-height:1.55 } code { color:#70e0d1; overflow-wrap:anywhere }
+      label { display:block; margin:16px 0 6px; font-weight:700 } input { width:100%; box-sizing:border-box; padding:12px; border-radius:12px; border:1px solid #46615d; background:#0f1514; color:#fff }
+      button { margin:10px 8px 0 0; padding:11px 16px; border:0; border-radius:999px; background:#67dccd; color:#09211e; font-weight:800; cursor:pointer }
+      button[disabled] { opacity:.45; cursor:not-allowed } .secondary { background:#263b38; color:#dce9e6 }
+      .panel { margin-top:14px; padding:14px; border-radius:14px; background:#0f1514; border:1px solid #324945 }
+      .status { white-space:pre-wrap; overflow-wrap:anywhere; font:12px/1.6 ui-monospace, monospace; color:#aee8df }
+      .warning { color:#ffd596 } .error { color:#ffaaa2 }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p class="warning"><strong>TESTNET PROTOTYPE ONLY.</strong> Fixed payer, recipient, amount, contracts, reference, and commitment. Submitted is not confirmed.</p>
+      <h1>On-chain invoice reference runner</h1>
+      <div id="facts" class="panel status">Loading fixed test configuration…</div>
+
+      <h2>1. Circle email authentication</h2>
+      <label for="email">Payer account email</label>
+      <input id="email" type="email" autocomplete="email" placeholder="payer@example.com" />
+      <button id="send-otp" disabled>Send OTP</button>
+      <button id="verify-otp" class="secondary" disabled>Open OTP verification</button>
+      <div id="auth-status" class="panel status">Initializing Circle Web SDK…</div>
+
+      <h2>2. Sequential operations</h2>
+      <button id="approve" disabled>Approve exact 0.01 USDC</button>
+      <button id="pay" disabled>Pay prototype</button>
+      <h2>3. Atomic batch operation</h2>
+      <button id="batch" disabled>Approve + pay V2 with plaintext memo</button>
+      <h2>4. Arc Memo plaintext payment</h2>
+      <div id="memo-facts" class="panel status">Loading fixed Arc Memo operation…</div>
+      <button id="memo" disabled>Pay 0.01 USDC with “Thanks Miley”</button>
+      <div id="operation-status" class="panel status">Authenticate before creating a challenge.</div>
+    </main>
+    <script type="module" src="/browser-runner.js"></script>
+  </body>
+</html>
