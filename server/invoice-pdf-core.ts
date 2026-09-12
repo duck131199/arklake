@@ -18,6 +18,30 @@ function drawLabelValue(page: PDFPage, font: PDFFont, bold: PDFFont, label: stri
   page.drawText(text, { x, y: y - 21, size: 11, font, color: rgb(0.08, 0.15, 0.18) })
 }
 
+export function wrapInvoiceDescription(value: string, font: PDFFont, size: number, width: number) {
+  const lines: string[] = []
+  for (const paragraph of value.replace(/\r\n?/g, '\n').split('\n')) {
+    if (!paragraph) { lines.push(''); continue }
+    let line = ''
+    for (const word of safePdfText(paragraph).split(/\s+/)) {
+      let remainder = word
+      while (remainder && font.widthOfTextAtSize(remainder, size) > width) {
+        let split = 1
+        while (split < remainder.length && font.widthOfTextAtSize(remainder.slice(0, split + 1), size) <= width) split += 1
+        if (line) { lines.push(line); line = '' }
+        lines.push(remainder.slice(0, split))
+        remainder = remainder.slice(split)
+      }
+      if (!remainder) continue
+      const candidate = line ? `${line} ${remainder}` : remainder
+      if (font.widthOfTextAtSize(candidate, size) <= width) line = candidate
+      else { lines.push(line); line = remainder }
+    }
+    lines.push(line)
+  }
+  return lines
+}
+
 export async function createInvoicePdf(invoice: InvoicePdfData) {
   const document = await PDFDocument.create()
   document.setTitle(`Arklake invoice ${invoice.invoiceNumber}`)
@@ -65,8 +89,21 @@ export async function createInvoicePdf(invoice: InvoicePdfData) {
   drawLabelValue(page, regular, bold, invoice.status === 'paid' ? 'Paid at' : invoice.status === 'expired' ? 'Expired at' : 'Expires', invoice.status === 'paid' && invoice.paidAt ? pdfDate(invoice.paidAt, timeZone) : pdfDate(invoice.expiresAt, timeZone), 306, 435, 237)
   page.drawLine({ start: { x: left, y: 394 }, end: { x: right, y: 394 }, thickness: 0.7, color: border })
 
-  page.drawText('DESCRIPTION', { x: left, y: 362, size: 8, font: bold, color: slate })
-  page.drawText(safePdfText(invoice.memo || '-').slice(0, 92), { x: left, y: 335, size: 11, font: regular, color: ink, maxWidth: right - left, lineHeight: 16 })
+  const description = invoice.memo.trim()
+  if (description) {
+    const lines = wrapInvoiceDescription(description, regular, 11, right - left)
+    const firstPageCapacity = invoice.status === 'expired' ? 2 : 13
+    page.drawText('DESCRIPTION', { x: left, y: 362, size: 8, font: bold, color: slate })
+    lines.slice(0, firstPageCapacity).forEach((line, index) => page.drawText(line, { x: left, y: 335 - index * 16, size: 11, font: regular, color: ink }))
+
+    for (let offset = firstPageCapacity; offset < lines.length; offset += 41) {
+      const continuation = document.addPage([595.28, 841.89])
+      continuation.drawText('DESCRIPTION (CONTINUED)', { x: left, y: 790, size: 8, font: bold, color: slate })
+      lines.slice(offset, offset + 41).forEach((line, index) => continuation.drawText(line, { x: left, y: 763 - index * 16, size: 11, font: regular, color: ink }))
+      continuation.drawLine({ start: { x: left, y: 72 }, end: { x: right, y: 72 }, thickness: 0.7, color: border })
+      continuation.drawText(`Arklake invoice ${safePdfText(invoice.invoiceNumber)}`, { x: left, y: 50, size: 8, font: regular, color: slate })
+    }
+  }
 
   if (invoice.status === 'expired') {
     page.drawRectangle({ x: left, y: 258, width: right - left, height: 46, color: rgb(0.97, 0.96, 0.94) })

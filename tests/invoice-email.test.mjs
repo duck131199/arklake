@@ -152,6 +152,23 @@ test('new invoice template is complete and its QR contains only the public invoi
   assert.equal(invoiceEmailIdempotencyKey(invoice.id, 'invoice_created'), `invoice-email-${invoice.id}-invoice_created`)
 })
 
+test('invoice emails conditionally render a safely escaped multiline Description', async () => {
+  const unsafeMemo = 'First line\n<script>alert("x")</script>'
+  for (const eventType of ['invoice_created', 'invoice_paid', 'invoice_payment_confirmed']) {
+    const record = eventType === 'invoice_created'
+      ? { ...invoice, memo: unsafeMemo }
+      : { ...invoice, memo: unsafeMemo, status: 'paid', paid_at: '2026-09-10T02:55:28Z', payment_tx_hash: `0x${'c'.repeat(64)}` }
+    const message = await renderInvoiceEmail(eventType, record, 'seller@example.com', 'payer@example.com', 'https://arklake.site')
+    assert.match(message.text, /Description: First line\n<script>alert\("x"\)<\/script>/)
+    assert.match(message.html, /First line<br>&lt;script&gt;alert\(&quot;x&quot;\)&lt;\/script&gt;/)
+    assert.doesNotMatch(message.html, /<script>alert/)
+
+    const empty = await renderInvoiceEmail(eventType, { ...record, memo: '  \n ' }, 'seller@example.com', 'payer@example.com', 'https://arklake.site')
+    assert.doesNotMatch(empty.text, /Description:/)
+    assert.doesNotMatch(empty.html, />Description</)
+  }
+})
+
 test('Paid email confirms verified payment to the seller without receipt language', async () => {
   const paidInvoice = { ...invoice, status: 'paid', paid_at: '2026-09-10T02:55:28Z', payment_tx_hash: `0x${'a'.repeat(64)}` }
   const message = await renderInvoiceEmail('invoice_paid', paidInvoice, 'seller@example.com', 'seller@example.com', 'https://arklake.site')

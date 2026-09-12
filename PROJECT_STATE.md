@@ -116,6 +116,7 @@ Status: **INVOICE CORE + PUBLIC INVOICE V1 CHECKPOINTED — PAYMENT ENTRY + DOWN
 - Wallet Activity refresh UX is CODE, TEST, and LOCAL RUNTIME PASS. After Wallet Send, bounded Activity polling reduced observed Circle-confirmed-to-database latency from about 21–23 seconds to about 3–5 seconds, while focus/visibility refresh and existing deduplication prevent manual F5 and duplicate activity/email records.
 - Wallet balance refresh UX is CODE and TEST PASS: the existing sender polling remains in place, confirmed new Receive activity starts a bounded balance refresh, and focus/visibility refreshes balance once. Exact sender/receiver balance runtime latency has not yet been measured with sufficient browser telemetry. Production refresh UX has not been tested.
 - Invoice Email remains guarded by `ARKLAKE_INVOICE_EMAIL_ENABLED` and is off unless the server value is exactly `true`.
+- Invoice Description / Memo V1 is CODE PASS, TEST PASS, and LOCAL VISUAL/REVIEW PASS; Production has not been tested. Description remains optional, trimmed, and limited to 500 characters by the existing API/schema; multiline text is preserved and safely rendered only when present across Create review, Seller/Public detail, invoice emails, and Invoice PDF. Description V1 is off-chain business context. An on-chain Invoice/Payment Reference has not been removed from the roadmap: it is the next workstream for binding invoice, payment, and Arcscan evidence, and is not implemented in this checkpoint.
 
 ### Product constraint for future Public Invoice / Payment
 

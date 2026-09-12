@@ -2517,7 +2517,7 @@ function AppCreateInvoicePage({ onCreateInvoice, onNavigate }: { onCreateInvoice
                   <span>{amount.trim()} USDC</span>
                 </span>
               </ReviewInvoiceRow>
-              <ReviewInvoiceRow label="Memo">{memo.trim() || '—'}</ReviewInvoiceRow>
+              {memo.trim() ? <ReviewInvoiceRow label="Description"><span className="whitespace-pre-wrap">{memo.trim()}</span></ReviewInvoiceRow> : null}
               <ReviewInvoiceRow label="Expiry">{expiry}</ReviewInvoiceRow>
             </div>
           </div>
@@ -2581,12 +2581,13 @@ function AppCreateInvoicePage({ onCreateInvoice, onNavigate }: { onCreateInvoice
           </label>
 
           <label className="block">
-            <span className="text-sm font-semibold text-arklake-ink">Memo <span className="font-medium text-slate">Optional</span></span>
-            <input
+            <span className="text-sm font-semibold text-arklake-ink">Description <span className="font-medium text-slate">Optional</span></span>
+            <textarea
               className="mt-2 w-full rounded-[1.25rem] border border-lake-border bg-surface px-4 py-3 text-base font-medium text-arklake-ink outline-none transition placeholder:text-slate focus:border-arklake-aqua focus:ring-4 focus:ring-arklake-aqua/15"
-              type="text"
               value={memo}
               onChange={(event) => setMemo(event.target.value)}
+              maxLength={500}
+              rows={3}
               placeholder="Website design"
               aria-describedby="create-invoice-memo-helper"
             />
@@ -2700,7 +2701,7 @@ function AppInvoiceDetailPage({ invoice, wasJustCreated = false, onNavigate }: {
               <span>{invoice.amount} {invoice.asset}</span>
             </span>
           </ReviewInvoiceRow>
-          <ReviewInvoiceRow label="Memo">{invoice.memo || '—'}</ReviewInvoiceRow>
+          {invoice.memo.trim() ? <ReviewInvoiceRow label="Description"><span className="whitespace-pre-wrap">{invoice.memo}</span></ReviewInvoiceRow> : null}
           <ReviewInvoiceRow label="Created">{formatInvoiceDateTime(invoice.createdAt)}</ReviewInvoiceRow>
           <ReviewInvoiceRow label={status === 'Expired' ? 'Expired at' : 'Expires'}>{formatInvoiceDateTime(invoice.expiresAt)}</ReviewInvoiceRow>
           {status === 'Paid' && invoice.paidAt ? <ReviewInvoiceRow label="Paid at">{formatInvoiceDateTime(invoice.paidAt)}</ReviewInvoiceRow> : null}
@@ -3167,7 +3168,7 @@ function PublicInvoicePage({ invoiceId, sessionStatus, wallet, balances, circleA
                 <a href={`/api/invoice-pdf?id=${encodeURIComponent(invoice.id)}&timeZone=${encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)}`} className="inline-flex items-center justify-center rounded-full border border-lake-border bg-surface px-4 py-2 text-sm font-semibold text-arklake-ink shadow-sm transition hover:bg-aqua-mist/50">Download invoice</a>
               </div>
               <div className="grid gap-4 rounded-[1.5rem] border border-lake-border bg-lake-canvas p-5 sm:grid-cols-2">
-                <div><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate">Memo</p><p className="mt-2 text-sm font-semibold">{invoice.memo || '—'}</p></div>
+                {invoice.memo.trim() ? <div><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate">Description</p><p className="mt-2 whitespace-pre-wrap text-sm font-semibold">{invoice.memo}</p></div> : null}
                 <div><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate">Created</p><p className="mt-2 text-sm font-semibold">{formatInvoiceDateTime(new Date(invoice.createdAt))}</p></div>
                 <div><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate">{invoice.status === 'expired' ? 'Expired' : 'Expires'}</p><p className="mt-2 text-sm font-semibold">{formatInvoiceDateTime(new Date(invoice.expiresAt))}</p></div>
                 {invoice.status === 'paid' && invoice.paidAt ? <div><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate">Paid at</p><p className="mt-2 text-sm font-semibold">{formatInvoiceDateTime(new Date(invoice.paidAt))}</p></div> : null}

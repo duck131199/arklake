@@ -16,6 +16,15 @@ test('accepts a guest payer email and normalizes invoice input', () => {
   assert.deepEqual(JSON.parse(JSON.stringify(result.data)), { payerEmail: 'payer@example.com', amount: '20.25', memo: 'Design', expiry: '7 days' })
 })
 
+test('memo is optional, trimmed, multiline-safe and limited to 500 characters', () => {
+  assert.equal(validateInvoiceCreate({ payerEmail: 'payer@example.com', amount: '1', memo: '', expiry: '7 days' }).data.memo, '')
+  assert.equal(validateInvoiceCreate({ payerEmail: 'payer@example.com', amount: '1', memo: '   \n  ', expiry: '7 days' }).data.memo, '')
+  assert.equal(validateInvoiceCreate({ payerEmail: 'payer@example.com', amount: '1', memo: 'Line one\nLine two', expiry: '7 days' }).data.memo, 'Line one\nLine two')
+  assert.equal(validateInvoiceCreate({ payerEmail: 'payer@example.com', amount: '1', memo: 'x'.repeat(500), expiry: '7 days' }).data.memo.length, 500)
+  assert.match(validateInvoiceCreate({ payerEmail: 'payer@example.com', amount: '1', memo: 'x'.repeat(501), expiry: '7 days' }).error, /500 characters/)
+  assert.equal(validateInvoiceCreate({ payerEmail: 'payer@example.com', amount: '1', memo: '<b>R&D & design</b>', expiry: '7 days' }).data.memo, '<b>R&D & design</b>')
+})
+
 test('rejects invalid amount, email, expiry and excess precision', () => {
   assert.ok(validateInvoiceCreate({ payerEmail: 'x', amount: '1', expiry: '7 days' }).error)
   assert.ok(validateInvoiceCreate({ payerEmail: 'payer@example.com', amount: '0', expiry: '7 days' }).error)

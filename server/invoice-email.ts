@@ -28,6 +28,7 @@ type InvoiceEmailRecord = {
 const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (character) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 })[character]!)
+const escapeMultilineHtml = (value: string) => escapeHtml(value).replace(/\r\n?|\n/g, '<br>')
 
 const retryAt = (attempts: number) => new Date(Date.now() + Math.min(60, 2 ** Math.min(attempts, 5)) * 60_000).toISOString()
 const displayDate = (value: string) => {
@@ -55,15 +56,17 @@ export async function renderInvoiceEmail(eventType: InvoiceEmailEvent, invoice: 
   const invoiceUrl = `${publicUrl.replace(/\/$/, '')}/invoice/${encodeURIComponent(invoice.id)}`
   const arcscanUrl = invoice.payment_tx_hash ? `https://testnet.arcscan.app/tx/${encodeURIComponent(invoice.payment_tx_hash)}` : null
   const transactionLabel = invoice.payment_tx_hash ? `${invoice.payment_tx_hash.slice(0, 10)}...${invoice.payment_tx_hash.slice(-9)}` : ''
+  const description = invoice.memo.trim()
   const details = isPaid ? [
     ['Invoice number', invoice.invoice_number], [isPayerConfirmation ? 'Paid to' : 'Paid by', isPayerConfirmation ? sellerEmail : invoice.payer_email], ['Amount', amount],
+    ...(description ? [['Description', description]] : []),
     ['Paid at', displayDate(invoice.paid_at || invoice.expires_at)], ['Payment details', `${invoice.asset} · Arc Testnet`],
   ] : [
     ['From', sellerEmail], ['Bill to', recipientEmail], ['Invoice number', invoice.invoice_number],
-    ['Description', invoice.memo || '—'], ['Amount due', amount], ['Payment details', `${invoice.asset} · Arc Testnet`],
+    ...(description ? [['Description', description]] : []), ['Amount due', amount], ['Payment details', `${invoice.asset} · Arc Testnet`],
     ['Created at', displayDate(invoice.created_at)], ['Expires', displayDate(invoice.expires_at)],
   ]
-  const rows = details.map(([label, value]) => `<tr><td style="padding:9px 0;color:#708593">${escapeHtml(label)}</td><td align="right" style="padding:9px 0;color:#102a43;font-weight:600">${escapeHtml(value)}</td></tr>`).join('')
+  const rows = details.map(([label, value]) => `<tr><td style="padding:9px 0;color:#708593;vertical-align:top">${escapeHtml(label)}</td><td align="right" style="padding:9px 0;color:#102a43;font-weight:600">${label === 'Description' ? escapeMultilineHtml(value) : escapeHtml(value)}</td></tr>`).join('')
   const qrContent = isPaid ? null : await QRCode.toBuffer(invoiceUrl, { type: 'png', width: 144, margin: 1, color: { dark: '#102a43', light: '#ffffff' } })
   const action = isPaid
     ? `<p style="margin:26px 0 0"><a href="${escapeHtml(invoiceUrl)}" style="display:inline-block;border-radius:999px;background:#102a43;padding:13px 22px;color:#fff;font-size:14px;font-weight:700;text-decoration:none">View paid invoice</a></p><div style="margin-top:24px;padding-top:22px;border-top:1px solid #edf2f2"><p style="margin:0;color:#708593;font-size:12px;line-height:18px">Transaction</p><p style="margin:6px 0 0;color:#102a43;font-size:12px;line-height:18px">${escapeHtml(transactionLabel)}</p>${arcscanUrl ? `<p style="margin:9px 0 0"><a href="${escapeHtml(arcscanUrl)}" style="color:#176b70;font-size:12px;line-height:18px">View on Arcscan</a></p>` : ''}</div>`
