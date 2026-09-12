@@ -23,19 +23,12 @@ test('attempt and Circle challenge are persisted before SDK execution', () => {
   assert.ok(request > -1 && execute > request)
 })
 
-test('regular Send stays a direct transfer while Pay with Arklake uses its stable intent idempotency key', () => {
+test('regular Send omits refId while Pay with Arklake uses its intent ID', () => {
   assert.doesNotMatch(api, /getReferenceId/)
-  assert.doesNotMatch(api, /refId:/)
+  assert.match(api, /const referenceId = intentCredentials\?\.intentId/)
+  assert.match(api, /\.\.\.\(referenceId \? \{ refId: referenceId \} : \{\}\)/)
   assert.match(api, /let circleIdempotencyKey: string = crypto\.randomUUID\(\)/)
   assert.match(api, /circleIdempotencyKey = start\.idempotency_key/)
-})
-
-test('Pay with Arklake builds an atomic V2 payment from DB-authoritative invoice and payer wallet data', () => {
-  assert.match(api, /CIRCLE_CONTRACT_EXECUTION_URL/)
-  assert.match(api, /\.from\('invoices'\)[\s\S]+invoice_number,memo,receiving_wallet_address,amount,asset,status,expires_at/)
-  assert.match(api, /\.from\('arklake_wallets'\)[\s\S]+circle_wallet_id', walletId/)
-  assert.match(api, /buildArklakeInvoicePaymentBatch\([\s\S]+paymentReference: invoice\.invoice_number[\s\S]+memo: invoice\.memo \|\| ''/)
-  assert.match(api, /contractAddress: circleWallet\.address[\s\S]+abiFunctionSignature: invoicePaymentBatchSignature/)
 })
 
 test('reload resumes persisted recovery and cannot render a fresh submit attempt', () => {

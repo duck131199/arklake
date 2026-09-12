@@ -1,13 +1,10 @@
 import { createHash } from 'node:crypto'
 import { createClient } from '@supabase/supabase-js'
 import { getCircleRecoverySession } from '../auth/session.js'
-import { buildArklakeInvoicePaymentBatch, invoicePaymentBatchSignature } from '../../server/invoice-payment-contract.js'
-import { invoiceUsdcBaseUnits } from '../../server/invoice-payment-verify-core.js'
 
 const CIRCLE_WALLETS_URL = 'https://api.circle.com/v1/w3s/wallets'
 const CIRCLE_USER_INITIALIZE_URL = 'https://api.circle.com/v1/w3s/user/initialize'
 const CIRCLE_TRANSFER_URL = 'https://api.circle.com/v1/w3s/user/transactions/transfer'
-const CIRCLE_CONTRACT_EXECUTION_URL = 'https://api.circle.com/v1/w3s/user/transactions/contractExecution'
 const CIRCLE_TRANSACTIONS_URL = 'https://api.circle.com/v1/w3s/transactions'
 const CIRCLE_CHALLENGES_URL = 'https://api.circle.com/v1/w3s/user/challenges'
 const arklakeBlockchain = 'ARC-TESTNET'
@@ -167,59 +164,19 @@ const listBalances = async (userToken: string, walletId: string) => {
 
 const createTransferTransaction = async (userToken: string, body: unknown) => {
   const walletId = getWalletId(body)
+  const destinationAddress = getDestinationAddress(body)
+  const amount = getTransferAmount(body)
   const isInvoicePayment = isRecord(body) && typeof body.intentId === 'string' && typeof body.intentToken === 'string'
   const intentCredentials = isInvoicePayment ? getIntentCredentials(body) : null
+  const referenceId = intentCredentials?.intentId
 
   const walletsResult = await listWallets(userToken)
   if (!walletsResult.ok || !isRecord(walletsResult.payload) || !Array.isArray(walletsResult.payload.wallets)) {
     return { ok: false, status: walletsResult.status, payload: { error: 'Circle wallet lookup failed' } }
   }
 
-  const circleWallet = walletsResult.payload.wallets.find((wallet) => isArklakeWallet(wallet, walletId))
-  if (!isRecord(circleWallet) || typeof circleWallet.address !== 'string' || !/^0x[a-fA-F0-9]{40}$/.test(circleWallet.address)) {
+  if (!walletsResult.payload.wallets.some((wallet) => isArklakeWallet(wallet, walletId))) {
     return { ok: false, status: 403, payload: { error: 'Wallet is not an Arklake Arc Testnet wallet' } }
-  }
-
-  let destinationAddress = isInvoicePayment ? '' : getDestinationAddress(body)
-  let amount = isInvoicePayment ? '' : getTransferAmount(body)
-  let invoiceBatch: ReturnType<typeof buildArklakeInvoicePaymentBatch> | null = null
-  if (intentCredentials) {
-    const supabase = supabaseClient()
-    const { data: intent, error: intentError } = await supabase.from('invoice_payment_intents')
-      .select('invoice_id,receiving_wallet_address,amount,asset,status,expires_at')
-      .eq('id', intentCredentials.intentId).eq('public_token_hash', intentCredentials.intentTokenHash).eq('payment_rail', 'arklake')
-      .maybeSingle<{ invoice_id: string; receiving_wallet_address: string; amount: string | number; asset: string; status: string; expires_at: string }>()
-    if (intentError) throw intentError
-    if (!intent) return { ok: false, status: 404, payload: { error: 'Payment attempt not found.' } }
-    const { data: invoice, error: invoiceError } = await supabase.from('invoices')
-      .select('invoice_number,memo,receiving_wallet_address,amount,asset,status,expires_at')
-      .eq('id', intent.invoice_id).maybeSingle<{ invoice_number: string; memo: string | null; receiving_wallet_address: string; amount: string | number; asset: string; status: string; expires_at: string }>()
-    if (invoiceError) throw invoiceError
-    const { data: payerWallet, error: payerWalletError } = await supabase.from('arklake_wallets')
-      .select('address').eq('circle_wallet_id', walletId).eq('blockchain', arklakeBlockchain).eq('account_type', arklakeAccountType)
-      .maybeSingle<{ address: string }>()
-    if (payerWalletError) throw payerWalletError
-    if (!invoice || !payerWallet || payerWallet.address.toLowerCase() !== circleWallet.address.toLowerCase()) {
-      return { ok: false, status: 409, payload: { error: 'The payment wallet or invoice target changed.' } }
-    }
-    if (invoice.status !== 'active' || new Date(invoice.expires_at).getTime() <= Date.now()) return { ok: false, status: 409, payload: { error: 'This invoice is no longer active.' } }
-    if (invoice.asset !== 'USDC' || intent.asset !== invoice.asset || invoiceUsdcBaseUnits(String(intent.amount)) !== invoiceUsdcBaseUnits(String(invoice.amount))
-      || intent.receiving_wallet_address.toLowerCase() !== invoice.receiving_wallet_address.toLowerCase()
-      || intent.expires_at !== invoice.expires_at) {
-      return { ok: false, status: 409, payload: { error: 'The payment target changed before submission.' } }
-    }
-    const amountUnits = invoiceUsdcBaseUnits(String(invoice.amount))
-    if (!amountUnits) return { ok: false, status: 409, payload: { error: 'This invoice amount cannot be paid on Arc Testnet.' } }
-    destinationAddress = invoice.receiving_wallet_address
-    amount = String(invoice.amount)
-    try {
-      invoiceBatch = buildArklakeInvoicePaymentBatch({
-        usdcAddress: arklakeCanonicalUsdcAddress, recipient: destinationAddress as `0x${string}`, amount: amountUnits,
-        paymentReference: invoice.invoice_number, memo: invoice.memo || '',
-      })
-    } catch (error) {
-      return { ok: false, status: 400, payload: { error: error instanceof Error ? error.message : 'Invalid on-chain invoice data.' } }
-    }
   }
 
   const balancesResult = await listBalances(userToken, walletId)
@@ -249,19 +206,21 @@ const createTransferTransaction = async (userToken: string, body: unknown) => {
     circleIdempotencyKey = start.idempotency_key
   }
 
-  const circleResponse = await fetch(invoiceBatch ? CIRCLE_CONTRACT_EXECUTION_URL : CIRCLE_TRANSFER_URL, {
+  const circleResponse = await fetch(CIRCLE_TRANSFER_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${getCircleApiKey()}`,
       'X-User-Token': userToken,
     },
-    body: JSON.stringify(invoiceBatch ? {
-      idempotencyKey: circleIdempotencyKey, walletId, contractAddress: circleWallet.address,
-      abiFunctionSignature: invoicePaymentBatchSignature, abiParameters: invoiceBatch, feeLevel: 'MEDIUM',
-    } : {
-      idempotencyKey: circleIdempotencyKey, destinationAddress, walletId, amounts: [amount],
-      tokenId: canonicalUsdcBalance.token.id, feeLevel: 'MEDIUM',
+    body: JSON.stringify({
+      idempotencyKey: circleIdempotencyKey,
+      destinationAddress,
+      walletId,
+      amounts: [amount],
+      tokenId: canonicalUsdcBalance.token.id,
+      feeLevel: 'MEDIUM',
+      ...(referenceId ? { refId: referenceId } : {}),
     }),
   })
 
