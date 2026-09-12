@@ -1,8 +1,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { invoicePaymentUsdcAddress } from '../server/invoice-payment-verify-core.ts'
 import { arcTestnetChainIdHex, counterpartyActivityType, internalCounterpartyAddress, reconciledDedupKey, verifyInternalUsdcTransfer } from '../server/circle/internal-transfer.ts'
+
+const invoicePaymentUsdcAddress = '0x3600000000000000000000000000000000000000'
 
 const source = '0x1111111111111111111111111111111111111111'
 const destination = '0x2222222222222222222222222222222222222222'

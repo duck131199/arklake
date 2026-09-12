@@ -1,7 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { verifyInvoicePaymentReceipt, invoicePaymentChainId, invoicePaymentUsdcAddress, erc20TransferTopic } from '../server/invoice-payment-verify-core.ts'
+import { buildServerModules } from './server-module-fixture.mjs'
+
+const built = buildServerModules(['server/invoice-payment-verify-core.ts'])
+const { verifyInvoicePaymentReceipt, invoicePaymentChainId, invoicePaymentUsdcAddress, erc20TransferTopic } = await built.import('server/invoice-payment-verify-core.js')
 
 const migration = readFileSync(new URL('../supabase/migrations/202609090001_invoice_completion_lifecycle.sql', import.meta.url), 'utf8')
 const verifierApi = readFileSync(new URL('../api/invoice-payment-verify.ts', import.meta.url), 'utf8')
