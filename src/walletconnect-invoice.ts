@@ -1,7 +1,7 @@
 import EthereumProvider from '@walletconnect/ethereum-provider'
 import { createPublicClient, formatUnits, http } from 'viem'
 import { arcTestnet } from 'viem/chains'
-import { arcTestnetChainIdHex, arcTestnetUsdcAddress, connectExternalWallet, externalUsdcAmount, submitExternalUsdcPayment, type ExternalWalletProvider } from './external-wallet'
+import { arcTestnetChainIdHex, arcTestnetUsdcAddress, connectExternalWallet, externalUsdcAmount, submitExternalInvoicePayment, type ExternalWalletProvider } from './external-wallet'
 
 export type InvoicePaymentIntent = {
   id: string
@@ -52,6 +52,7 @@ export async function connectInvoiceWalletConnect(projectId: string) {
     showQrModal: true,
     rpcMap: { [arcTestnet.id]: arcTestnet.rpcUrls.default.http[0] },
     methods: ['eth_sendTransaction', 'eth_accounts', 'eth_requestAccounts', 'eth_call', 'wallet_switchEthereumChain', 'wallet_addEthereumChain'],
+    optionalMethods: ['wallet_getCapabilities', 'wallet_sendCalls', 'wallet_getCallsStatus'],
     events: ['accountsChanged', 'chainChanged'],
     metadata: { name: 'Arklake', description: 'Pay an Arklake invoice', url: window.location.origin, icons: [`${window.location.origin}/brand/arklake-mark-trimmed.png`] },
   })
@@ -174,7 +175,8 @@ export async function submitWalletConnectIntent(input: {
     const result = await provider.request(request)
     return request.method === 'eth_chainId' && normalizeWalletConnectChainId(result) === arcTestnet.id ? arcTestnetChainIdHex : result
   } }
-  const balanceRaw = await createPublicClient({ chain: arcTestnet, transport: http(arcTestnet.rpcUrls.default.http[0]) }).readContract({
+  const publicClient = createPublicClient({ chain: arcTestnet, transport: http(arcTestnet.rpcUrls.default.http[0]) })
+  const balanceRaw = await publicClient.readContract({
     address: arcTestnetUsdcAddress,
     abi: [{ type: 'function', name: 'balanceOf', stateMutability: 'view', inputs: [{ name: 'account', type: 'address' }], outputs: [{ name: '', type: 'uint256' }] }],
     functionName: 'balanceOf',
@@ -182,7 +184,25 @@ export async function submitWalletConnectIntent(input: {
   })
   const balance = { raw: balanceRaw, amount: formatUnits(balanceRaw, 6) }
   if (balance.raw < externalUsdcAmount(input.intent.amount)) throw new Error(`Insufficient USDC balance. Available: ${balance.amount} USDC.`)
-  const txHash = await submitExternalUsdcPayment(arcProvider, connected.address, input.intent.recipientAddress, input.intent.amount)
+  const receiptProvider: ExternalWalletProvider = { request: async ({ method, params }) => {
+    if (method !== 'eth_getTransactionReceipt' || typeof params?.[0] !== 'string') throw new Error(`Unsupported read request: ${method}`)
+    try {
+      const receipt = await publicClient.getTransactionReceipt({ hash: params[0] as `0x${string}` })
+      return { status: receipt.status === 'success' ? '0x1' : '0x0' }
+    } catch (error) {
+      if ((error as { name?: string } | null)?.name === 'TransactionReceiptNotFoundError') return null
+      throw error
+    }
+  } }
+  const { txHash } = await submitExternalInvoicePayment({
+    provider: arcProvider,
+    receiptProvider,
+    payer: connected.address,
+    recipient: input.intent.recipientAddress,
+    amount: input.intent.amount,
+    invoiceNumber: input.intent.invoiceNumber,
+    memo: input.intent.memo,
+  })
   input.onSubmitted?.(txHash)
   await bindInvoicePaymentIntent(input.intent, txHash, input.fetcher)
   return { txHash, payer: connected.address, balance: balance.amount }

@@ -41,7 +41,7 @@ test('connect wallet and WalletConnect scan both use strict auto verification', 
   assert.match(app, /submitExternalInvoicePayment/)
   assert.match(app, /bindInvoicePaymentIntent\(externalPaymentIntent, hash\)/)
   assert.match(app, /autoVerifyInvoicePayment\(\{ invoiceId, txHash: hash, intentId: externalPaymentIntent\.id, intentToken: externalPaymentIntent\.token \}\)/)
-  assert.match(app, /createInvoicePaymentIntent\(invoiceId\)/)
+  assert.match(app, /createInvoicePaymentIntent\(invoiceId, fetch, 'wallet'\)/)
   assert.match(app, /submitWalletConnectIntent/)
   assert.match(app, /autoVerifyInvoicePayment\(\{ invoiceId, txHash: submitted\.txHash, intentId: intent\.id, intentToken: intent\.token \}\)/)
 })

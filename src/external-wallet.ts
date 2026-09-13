@@ -120,6 +120,7 @@ async function supportsAtomicCalls(provider: ExternalWalletProvider, payer: stri
 
 export async function submitExternalInvoicePayment(input: {
   provider: ExternalWalletProvider
+  receiptProvider?: ExternalWalletProvider
   payer: string
   recipient: string
   amount: string
@@ -152,7 +153,7 @@ export async function submitExternalInvoicePayment(input: {
   const [approve, pay] = calls
   const approveHash = await input.provider.request({ method: 'eth_sendTransaction', params: [{ from: input.payer, to: approve.to, data: approve.data }] })
   if (typeof approveHash !== 'string' || !txHashPattern.test(approveHash)) throw new Error('The wallet did not return an approval transaction hash.')
-  await waitForTransactionReceipt(input.provider, approveHash, input.pollMs, input.attempts)
+  await waitForTransactionReceipt(input.receiptProvider || input.provider, approveHash, input.pollMs, input.attempts)
   const payHash = await input.provider.request({ method: 'eth_sendTransaction', params: [{ from: input.payer, to: pay.to, data: pay.data }] })
   if (typeof payHash !== 'string' || !txHashPattern.test(payHash)) throw new Error('The wallet did not return a payment transaction hash.')
   return { txHash: payHash, mode: 'sequential' as const, approveTxHash: approveHash }

@@ -18,10 +18,12 @@ test('creates an intent from the exact invoice and snapshots the immutable targe
   assert.match(api, /expires_at: invoice\.expires_at/)
 })
 
-test('WalletConnect request uses the snapshot and binds its returned hash to that intent', () => {
+test('WalletConnect requests V2 payment capabilities and uses the server snapshot', () => {
   assert.match(client, /EthereumProvider\.init/)
   assert.match(client, /chains: \[arcTestnet\.id\]/)
-  assert.match(client, /submitExternalUsdcPayment\(arcProvider, connected\.address, input\.intent\.recipientAddress, input\.intent\.amount\)/)
+  assert.match(client, /optionalMethods: \['wallet_getCapabilities', 'wallet_sendCalls', 'wallet_getCallsStatus'\]/)
+  assert.match(client, /submitExternalInvoicePayment\(\{[\s\S]+payer: connected\.address[\s\S]+recipient: input\.intent\.recipientAddress[\s\S]+amount: input\.intent\.amount[\s\S]+invoiceNumber: input\.intent\.invoiceNumber[\s\S]+memo: input\.intent\.memo/)
+  assert.doesNotMatch(client, /submitExternalUsdcPayment\(/)
   assert.match(client, /JSON\.stringify\(\{ action: 'bind', intentId: intent\.id, token: intent\.token, txHash \}\)/)
   assert.match(client, /balance\.raw < externalUsdcAmount\(input\.intent\.amount\)/)
   assert.match(client, /createPublicClient\(\{ chain: arcTestnet,[\s\S]+readContract\([\s\S]+address: arcTestnetUsdcAddress[\s\S]+name: 'balanceOf'/)
@@ -101,7 +103,7 @@ test('happy path auto-verifies and has no hash input or Verify payment button', 
   const start = app.indexOf('const prepareScanPayment')
   const end = app.indexOf('const connectInvoiceWallet', start)
   const flow = app.slice(start, end)
-  assert.match(flow, /createInvoicePaymentIntent\(invoiceId\)/)
+  assert.match(flow, /createInvoicePaymentIntent\(invoiceId, fetch, 'wallet'\)/)
   assert.match(flow, /connectInvoiceWalletConnect/)
   assert.match(flow, /submitWalletConnectIntent/)
   assert.match(flow, /autoVerifyInvoicePayment\(\{ invoiceId, txHash: submitted\.txHash, intentId: intent\.id, intentToken: intent\.token \}\)/)

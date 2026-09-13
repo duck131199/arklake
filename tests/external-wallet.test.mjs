@@ -58,7 +58,7 @@ test('reads canonical Arc Testnet USDC and submits an exact immutable transfer',
   assert.ok(transaction.data.endsWith(externalUsdcAmount('1.25').toString(16).padStart(64, '0')))
 })
 
-test('Connect Wallet prefers one atomic V2 approve and pay batch', async () => {
+test('external invoice payment prefers one atomic V2 approve and pay batch', async () => {
   const calls = []
   const txHash = `0x${'b'.repeat(64)}`
   const provider = { request: async (request) => {
@@ -79,7 +79,7 @@ test('Connect Wallet prefers one atomic V2 approve and pay batch', async () => {
   assert.match(batch.calls[1].data, /^0x/)
 })
 
-test('Connect Wallet falls back only from unsupported atomic calls to sequential approve then V2 pay', async () => {
+test('external invoice payment falls back to sequential approve then V2 pay and can read approval receipt outside the wallet session', async () => {
   const calls = []
   const approveHash = `0x${'c'.repeat(64)}`
   const payHash = `0x${'d'.repeat(64)}`
@@ -88,19 +88,21 @@ test('Connect Wallet falls back only from unsupported atomic calls to sequential
     if (request.method === 'eth_chainId') return arcTestnetChainIdHex
     if (request.method === 'eth_accounts') return [address]
     if (request.method === 'wallet_getCapabilities') return {}
-    if (request.method === 'eth_getTransactionReceipt') return { status: '0x1' }
     if (request.method === 'eth_sendTransaction') return calls.filter(({ method }) => method === 'eth_sendTransaction').length === 1 ? approveHash : payHash
     throw new Error(`unexpected ${request.method}`)
   } }
-  const result = await submitExternalInvoicePayment({ provider, payer: address, recipient, amount: '0.01', invoiceNumber: 'ARK-20260913-TEST0002', memo: '', pollMs: 0, attempts: 1 })
+  const receiptCalls = []
+  const receiptProvider = { request: async (request) => { receiptCalls.push(request); return { status: '0x1' } } }
+  const result = await submitExternalInvoicePayment({ provider, receiptProvider, payer: address, recipient, amount: '0.01', invoiceNumber: 'ARK-20260913-TEST0002', memo: '', pollMs: 0, attempts: 1 })
   assert.deepEqual(result, { txHash: payHash, mode: 'sequential', approveTxHash: approveHash })
   const transactions = calls.filter(({ method }) => method === 'eth_sendTransaction').map(({ params }) => params[0])
   assert.equal(transactions.length, 2)
   assert.equal(transactions[0].to.toLowerCase(), arcTestnetUsdcAddress.toLowerCase())
   assert.equal(transactions[1].to.toLowerCase(), arklakeInvoicePaymentV2Address)
+  assert.deepEqual(receiptCalls.map(({ method }) => method), ['eth_getTransactionReceipt'])
 })
 
-test('Connect Wallet does not fall back after rejection and rejects Memo above 64 UTF-8 bytes before submission', async () => {
+test('external invoice payment does not fall back after atomic rejection and rejects Memo above 64 UTF-8 bytes before submission', async () => {
   const methods = []
   const rejectedProvider = { request: async ({ method }) => {
     methods.push(method)
@@ -122,4 +124,21 @@ test('Connect Wallet does not fall back after rejection and rejects Memo above 6
   await assert.rejects(submitExternalInvoicePayment({ provider: longMemoProvider, payer: address, recipient, amount: '1', invoiceNumber: 'ARK-TEST', memo: 'é'.repeat(33) }), /64-byte/)
   assert.equal(longMemoMethods.includes('wallet_sendCalls'), false)
   assert.equal(longMemoMethods.includes('eth_sendTransaction'), false)
+})
+
+test('sequential approval rejection never submits V2 pay or a direct USDC transfer', async () => {
+  const calls = []
+  const provider = { request: async (request) => {
+    calls.push(request)
+    if (request.method === 'eth_chainId') return arcTestnetChainIdHex
+    if (request.method === 'eth_accounts') return [address]
+    if (request.method === 'wallet_getCapabilities') return {}
+    if (request.method === 'eth_sendTransaction') throw Object.assign(new Error('Approval rejected'), { code: 4001 })
+    throw new Error(`unexpected ${request.method}`)
+  } }
+  await assert.rejects(submitExternalInvoicePayment({ provider, payer: address, recipient, amount: '0.01', invoiceNumber: 'ARK-20260913-TEST0003', memo: '' }), /Approval rejected/)
+  const transactions = calls.filter(({ method }) => method === 'eth_sendTransaction')
+  assert.equal(transactions.length, 1)
+  assert.equal(transactions[0].params[0].to.toLowerCase(), arcTestnetUsdcAddress.toLowerCase())
+  assert.match(transactions[0].params[0].data, /^0x095ea7b3/)
 })

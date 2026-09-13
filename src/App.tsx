@@ -2985,7 +2985,7 @@ function PublicInvoicePage({ invoiceId, sessionStatus, wallet, balances, circleA
     let submittedHash = ''
     let scanPhase = 'creating payment intent'
     try {
-      const intent = await createInvoicePaymentIntent(invoiceId)
+      const intent = await createInvoicePaymentIntent(invoiceId, fetch, 'wallet')
       setScanIntent(intent)
       setScanStatus('connecting')
       scanPhase = 'initializing WalletConnect'
