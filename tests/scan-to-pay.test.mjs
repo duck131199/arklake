@@ -29,14 +29,59 @@ test('WalletConnect requests V2 payment capabilities and uses the server snapsho
   assert.match(client, /createPublicClient\(\{ chain: arcTestnet,[\s\S]+readContract\([\s\S]+address: arcTestnetUsdcAddress[\s\S]+name: 'balanceOf'/)
 })
 
-test('Scan opens WalletConnect without requiring an injected browser wallet or dropping a valid session', () => {
+test('Scan opens WalletConnect without requiring an injected browser wallet', () => {
+  const connectStart = client.indexOf('export async function connectInvoiceWalletConnect')
+  const disconnectStart = client.indexOf('export async function disconnectInvoiceWalletConnect')
+  const connectFlow = client.slice(connectStart, disconnectStart)
+  assert.doesNotMatch(connectFlow, /window\.ethereum/)
+  assert.match(connectFlow, /if \(!provider\.session\) await provider\.connect\(\)/)
+  assert.match(connectFlow, /showQrModal: true/)
+})
+
+test('closing the WalletConnect QR can reopen it without creating another payment intent', () => {
   const connectStart = client.indexOf('export async function connectInvoiceWalletConnect')
   const submitStart = client.indexOf('export async function submitWalletConnectIntent')
   const connectFlow = client.slice(connectStart, submitStart)
-  assert.doesNotMatch(connectFlow, /window\.ethereum/)
-  assert.doesNotMatch(connectFlow, /provider\.disconnect/)
-  assert.match(connectFlow, /if \(!provider\.connected\) await provider\.connect\(\)/)
-  assert.match(connectFlow, /showQrModal: true/)
+  assert.match(client, /let invoiceWalletConnectProvider: Promise<Awaited<ReturnType<typeof EthereumProvider\.init>>> \| null = null/)
+  assert.match(connectFlow, /if \(!invoiceWalletConnectProvider\)/)
+  assert.match(connectFlow, /const provider = await invoiceWalletConnectProvider/)
+  assert.match(connectFlow, /if \(!provider\.session\) await provider\.connect\(\)/)
+
+  const prepareStart = app.indexOf('const prepareScanPayment')
+  const prepareEnd = app.indexOf('const retryScanConfirmation', prepareStart)
+  const prepareFlow = app.slice(prepareStart, prepareEnd)
+  assert.match(prepareFlow, /const intent = scanIntent \|\| await createInvoicePaymentIntent\(invoiceId, fetch, 'wallet'\)/)
+  assert.match(prepareFlow, /connectInvoiceWalletConnect\(import\.meta\.env\.VITE_REOWN_PROJECT_ID \|\| '', startNewSession\)/)
+  assert.doesNotMatch(prepareFlow, /setScanIntent\(null\)/)
+})
+
+test('the first Scan open for a fresh invoice replaces a persisted prior session and opens QR', () => {
+  const connectStart = client.indexOf('export async function connectInvoiceWalletConnect')
+  const disconnectStart = client.indexOf('export async function disconnectInvoiceWalletConnect')
+  const connectFlow = client.slice(connectStart, disconnectStart)
+  assert.match(connectFlow, /startNewSession = false/)
+  assert.match(connectFlow, /if \(startNewSession && provider\.session\) await provider\.disconnect\(\)/)
+  assert.match(connectFlow, /if \(!provider\.session\) await provider\.connect\(\)/)
+
+  const prepareStart = app.indexOf('const prepareScanPayment')
+  const prepareEnd = app.indexOf('const retryScanConfirmation', prepareStart)
+  const prepareFlow = app.slice(prepareStart, prepareEnd)
+  const freshSession = prepareFlow.indexOf('const startNewSession = !scanIntent')
+  const connect = prepareFlow.indexOf("connectInvoiceWalletConnect(import.meta.env.VITE_REOWN_PROJECT_ID || '', startNewSession)")
+  assert.ok(freshSession > -1 && connect > freshSession)
+})
+
+test('a completed Scan payment releases its session so the next invoice opens a fresh QR', () => {
+  assert.match(client, /export async function disconnectInvoiceWalletConnect\(\)/)
+  assert.match(client, /if \(provider\.session\) await provider\.disconnect\(\)/)
+
+  const prepareStart = app.indexOf('const prepareScanPayment')
+  const prepareEnd = app.indexOf('const retryScanConfirmation', prepareStart)
+  const prepareFlow = app.slice(prepareStart, prepareEnd)
+  const verification = prepareFlow.indexOf('await autoVerifyInvoicePayment')
+  const sessionRelease = prepareFlow.indexOf('await disconnectInvoiceWalletConnect().catch(() => undefined)', verification)
+  const invoiceReload = prepareFlow.indexOf('await loadInvoice()', sessionRelease)
+  assert.ok(verification > -1 && sessionRelease > verification && invoiceReload > sessionRelease)
 })
 
 test('Scan checks and switches Arc only after the WalletConnect session exists', () => {

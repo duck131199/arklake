@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
 import SwapFlow from './SwapFlow'
 import { autoVerifyInvoicePayment, CirclePaymentResolutionError, resolveCirclePaymentTxHash } from './invoice-payment-auto-confirm'
-import { bindInvoicePaymentIntent, connectInvoiceWalletConnect, createInvoicePaymentIntent, getArklakePaymentIntentStatus, submitWalletConnectIntent, walletConnectErrorMessage, type InvoicePaymentIntent } from './walletconnect-invoice'
+import { bindInvoicePaymentIntent, connectInvoiceWalletConnect, createInvoicePaymentIntent, disconnectInvoiceWalletConnect, getArklakePaymentIntentStatus, submitWalletConnectIntent, walletConnectErrorMessage, type InvoicePaymentIntent } from './walletconnect-invoice'
 import type { W3SSdk as CircleW3SSdk } from '@circle-fin/w3s-pw-web-sdk'
 import { arcTestnetChainIdHex, connectExternalWallet, externalUsdcAmount, externalWalletError, readExternalUsdcBalance, submitExternalInvoicePayment, switchExternalWalletToArc, type ExternalWalletProvider } from './external-wallet'
 import { runBoundedVisiblePoll } from './wallet-refresh'
@@ -2978,18 +2978,18 @@ function PublicInvoicePage({ invoiceId, sessionStatus, wallet, balances, circleA
 
   const prepareScanPayment = async () => {
     setPaymentOption('scan')
-    setScanIntent(null)
     setScanError('')
     setScanTxHash('')
     setScanStatus('loading')
     let submittedHash = ''
     let scanPhase = 'creating payment intent'
     try {
-      const intent = await createInvoicePaymentIntent(invoiceId, fetch, 'wallet')
+      const startNewSession = !scanIntent
+      const intent = scanIntent || await createInvoicePaymentIntent(invoiceId, fetch, 'wallet')
       setScanIntent(intent)
       setScanStatus('connecting')
       scanPhase = 'initializing WalletConnect'
-      const provider = await connectInvoiceWalletConnect(import.meta.env.VITE_REOWN_PROJECT_ID || '')
+      const provider = await connectInvoiceWalletConnect(import.meta.env.VITE_REOWN_PROJECT_ID || '', startNewSession)
       setScanStatus('submitting')
       scanPhase = 'preparing wallet transaction'
       const submitted = await submitWalletConnectIntent({ provider, intent, onSubmitted: (txHash) => {
@@ -2999,6 +2999,7 @@ function PublicInvoicePage({ invoiceId, sessionStatus, wallet, balances, circleA
       } })
       setScanStatus('verifying')
       await autoVerifyInvoicePayment({ invoiceId, txHash: submitted.txHash, intentId: intent.id, intentToken: intent.token })
+      await disconnectInvoiceWalletConnect().catch(() => undefined)
       await loadInvoice()
     } catch (scanLoadError) {
       const detail = walletConnectErrorMessage(scanLoadError)

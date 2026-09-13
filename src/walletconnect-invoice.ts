@@ -16,6 +16,8 @@ export type InvoicePaymentIntent = {
   expiresAt: string
 }
 
+let invoiceWalletConnectProvider: Promise<Awaited<ReturnType<typeof EthereumProvider.init>>> | null = null
+
 export async function createInvoicePaymentIntent(invoiceId: string, fetcher: typeof fetch = fetch, paymentRail: 'generic' | 'arklake' | 'wallet' = 'generic') {
   const response = await fetcher('/api/invoice-payment-intent', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'create', invoiceId, paymentRail }),
@@ -44,20 +46,33 @@ export async function getArklakePaymentIntentStatus(intent: InvoicePaymentIntent
   return { status: payload.status, recoverable: payload.recoverable === true }
 }
 
-export async function connectInvoiceWalletConnect(projectId: string) {
+export async function connectInvoiceWalletConnect(projectId: string, startNewSession = false) {
   if (!projectId) throw new Error('Reown Project ID is not configured.')
-  const provider = await EthereumProvider.init({
-    projectId,
-    chains: [arcTestnet.id],
-    showQrModal: true,
-    rpcMap: { [arcTestnet.id]: arcTestnet.rpcUrls.default.http[0] },
-    methods: ['eth_sendTransaction', 'eth_accounts', 'eth_requestAccounts', 'eth_call', 'wallet_switchEthereumChain', 'wallet_addEthereumChain'],
-    optionalMethods: ['wallet_getCapabilities', 'wallet_sendCalls', 'wallet_getCallsStatus'],
-    events: ['accountsChanged', 'chainChanged'],
-    metadata: { name: 'Arklake', description: 'Pay an Arklake invoice', url: window.location.origin, icons: [`${window.location.origin}/brand/arklake-mark-trimmed.png`] },
-  })
-  if (!provider.connected) await provider.connect()
+  if (!invoiceWalletConnectProvider) {
+    invoiceWalletConnectProvider = EthereumProvider.init({
+      projectId,
+      chains: [arcTestnet.id],
+      showQrModal: true,
+      rpcMap: { [arcTestnet.id]: arcTestnet.rpcUrls.default.http[0] },
+      methods: ['eth_sendTransaction', 'eth_accounts', 'eth_requestAccounts', 'eth_call', 'wallet_switchEthereumChain', 'wallet_addEthereumChain'],
+      optionalMethods: ['wallet_getCapabilities', 'wallet_sendCalls', 'wallet_getCallsStatus'],
+      events: ['accountsChanged', 'chainChanged'],
+      metadata: { name: 'Arklake', description: 'Pay an Arklake invoice', url: window.location.origin, icons: [`${window.location.origin}/brand/arklake-mark-trimmed.png`] },
+    }).catch((error) => {
+      invoiceWalletConnectProvider = null
+      throw error
+    })
+  }
+  const provider = await invoiceWalletConnectProvider
+  if (startNewSession && provider.session) await provider.disconnect()
+  if (!provider.session) await provider.connect()
   return provider as ExternalWalletProvider
+}
+
+export async function disconnectInvoiceWalletConnect() {
+  if (!invoiceWalletConnectProvider) return
+  const provider = await invoiceWalletConnectProvider
+  if (provider.session) await provider.disconnect()
 }
 
 function walletErrorCode(error: unknown): number | undefined {
