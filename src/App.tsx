@@ -1545,10 +1545,10 @@ function FinalCtaSection() {
           </p>
 
           <div className="mt-8 flex w-full flex-col gap-3 sm:w-auto sm:flex-row">
-            <a className="inline-flex w-full items-center justify-center rounded-full bg-arklake-ink px-6 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-deep-text hover:ring-4 hover:ring-arklake-aqua/15 sm:w-auto" href="#">
+            <a className="inline-flex w-full items-center justify-center rounded-full bg-arklake-ink px-6 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-deep-text hover:ring-4 hover:ring-arklake-aqua/15 sm:w-auto" href="/auth/sign-in">
               Get started
             </a>
-            <a className="inline-flex w-full items-center justify-center rounded-full border border-lake-border bg-surface px-6 py-3 text-sm font-semibold text-arklake-ink transition hover:border-arklake-aqua sm:w-auto" href="#">
+            <a className="inline-flex w-full items-center justify-center rounded-full border border-lake-border bg-surface px-6 py-3 text-sm font-semibold text-arklake-ink transition hover:border-arklake-aqua sm:w-auto" href="/auth/sign-in">
               Sign in
             </a>
           </div>
@@ -1693,8 +1693,8 @@ function AboutPage() {
           </nav>
 
           <div className="hidden items-center gap-3 sm:flex">
-            <a className="hidden text-sm font-semibold text-arklake-ink sm:inline-flex" href="#">Sign in</a>
-            <a className="rounded-full bg-arklake-ink px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-deep-text" href="#">
+            <a className="hidden text-sm font-semibold text-arklake-ink sm:inline-flex" href="/auth/sign-in">Sign in</a>
+            <a className="rounded-full bg-arklake-ink px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-deep-text" href="/auth/sign-in">
               Get started
             </a>
           </div>
