@@ -22,13 +22,13 @@ No Arklake-owned production contract is recorded on this network yet.
 | --- | --- |
 | Name | `ArklakeInvoicePaymentPrototype` |
 | Purpose | Test whether a Circle User-Controlled Wallet SCA can atomically approve canonical USDC, make an exact payment, and emit a public payment reference plus plaintext Memo. |
-| Status | **V2 PLAINTEXT MEMO RUNTIME PASS — DEPLOYED ARC TESTNET PROTOTYPE** |
+| Status | **V2 PLAINTEXT MEMO RUNTIME PASS — DEPLOYED ARC TESTNET PROTOTYPE, PRODUCTION-WIRED** |
 | Contract address | [`0x7Ef8D661e800ec959daAaE67A8bD4fAaAe3A43D7`](https://testnet.arcscan.app/address/0x7Ef8D661e800ec959daAaE67A8bD4fAaAe3A43D7) |
 | Deployer | Project owner [`0xB1f9eE64333564050964241688899166307d446e`](https://testnet.arcscan.app/address/0xB1f9eE64333564050964241688899166307d446e) |
 | Deployment transaction | [`0xbf6ca07a97a1de542bec8787fd5baa43ecbcfe77c506249f0cba35321a1ae377`](https://testnet.arcscan.app/tx/0xbf6ca07a97a1de542bec8787fd5baa43ecbcfe77c506249f0cba35321a1ae377) |
 | Source | [`prototype/onchain-invoice-reference/contracts/ArklakeInvoicePaymentPrototype.sol`](../prototype/onchain-invoice-reference/contracts/ArklakeInvoicePaymentPrototype.sol) |
 | ABI/source verification | **Verified (exact match)** on Arcscan/Blockscout. Solidity `0.8.24+commit.e11b9ed9`, optimizer disabled, 200 configured runs, EVM Cancun, IPFS metadata hash. Runtime bytecode also matches the local build artifact exactly. |
-| Notes | Deployment receipt succeeded on Arc Testnet chain ID `5042002`. Runtime proved one Circle UCW confirmation can execute atomic exact-amount approval and payment, emit plaintext Memo, leave zero retained USDC, and leave zero allowance. It is not connected to an invoice, a production payment rail, or the production verifier. |
+| Notes | Deployment receipt succeeded on Arc Testnet chain ID `5042002`. Runtime proved one Circle UCW confirmation can execute atomic exact-amount approval and payment, emit plaintext Memo, leave zero retained USDC, and leave zero allowance. Pay with Arklake, Connect Wallet, and Scan to Pay now use this contract with invoice-bound data and the strict production verifier. The contract remains explicitly testnet and prototype-grade. |
 
 ### Historical Prototype V1
 
@@ -36,7 +36,7 @@ Prototype V1 remains recorded as R&D evidence at [`0xCACDD50644528dFBA131777B528
 
 ## 4. Payment reference / invoice proof workstream
 
-Invoice Description V1 is off-chain business context. It is stored with the invoice and rendered in the applicable UI, email, and PDF surfaces, but it is not included in current payment calldata or transaction events.
+Invoice Description V1 remains off-chain business context and the full value is stored with the invoice for UI, email, and PDF surfaces. When its UTF-8 representation is at most 64 bytes, the exact value is also used as the plaintext payment Memo; longer values are rejected before an on-chain invoice payment and are never truncated.
 
 On-chain payment reference is a separate workstream. Prototype V2 proves:
 
@@ -44,15 +44,15 @@ On-chain payment reference is a separate workstream. Prototype V2 proves:
 - `memo`: plaintext UTF-8 Memo, limited to 64 bytes without truncation;
 - `InvoicePayment`: an event containing the deterministic reference hash, payer, recipient, token, amount, public reference, and plaintext Memo.
 
-The prototype is deployed and runtime-validated on Arc Testnet but has not been wired into production. In a future integration, `paymentReference` must map to the exact existing Arklake Invoice ID and `memo` must come from that invoice's Memo. Production payment and verifier behavior remain unchanged.
+The V2 contract is deployed and runtime-validated on Arc Testnet and is wired into all three invoice payment rails in the live Arklake product. `paymentReference` comes from the exact server-authoritative Arklake invoice number and `memo` comes from that invoice's Description. The production verifier requires the matching V2 event and canonical USDC transfer before Paid.
 
 ## 5. Existing on-chain payment behavior
 
-Pay with Arklake currently uses a Circle User-Controlled Wallet smart contract account on Arc Testnet. Circle submits the wallet operation through ERC-4337, so Arcscan may show an outer `handleOps(...)` transaction while the receipt contains the canonical USDC transfer made by the wallet operation.
+Pay with Arklake uses a Circle User-Controlled Wallet smart contract account on Arc Testnet. Circle submits the wallet operation through ERC-4337, so Arcscan may show an outer `handleOps(...)` transaction while the receipt contains the V2 contract call, canonical USDC transfer, and `InvoicePayment` event.
 
-The current production payment behavior is a direct canonical USDC transfer to the invoice recipient. It does not add an Arklake invoice reference or Description to calldata, and it does not emit an Arklake-owned payment event.
+Pay with Arklake uses an atomic exact-amount USDC approval and V2 payment. Connect Wallet and WalletConnect-based Scan to Pay use the same server-authoritative V2 calldata, preferring a supported atomic wallet batch and otherwise using sequential exact approval followed by payment. None of the three invoice rails silently falls back to a direct USDC transfer.
 
-Arklake correlates the payment through its Payment Intent and exact transaction hash, then runs strict server-side verification. The verifier requires the expected chain, successful receipt and confirmations, canonical USDC, exact recipient and amount, a valid invoice payment window, intent correlation, and transaction uniqueness before the atomic Paid transition. Circle challenge completion or transaction submission alone is not Paid.
+Arklake correlates the payment through its Payment Intent and exact transaction hash, then runs strict server-side verification. The verifier requires the expected chain, successful receipt and confirmations, canonical USDC, exact payer, recipient and amount, the event from the exact V2 contract, exact invoice reference and plaintext Memo, a valid invoice payment window, intent correlation, and transaction uniqueness before the atomic Paid transition. Wallet or Circle submission alone is not Paid.
 
 Primary implementation paths:
 
@@ -74,7 +74,7 @@ Add a transaction only after its runtime evidence has been checked against the e
 | Sequential prototype payment | Runtime-audited | [`0x95fd5cf6133ba16c08459f0a6a8e9db3eaf84497d4f0186fdc7094aabc07641c`](https://testnet.arcscan.app/tx/0x95fd5cf6133ba16c08459f0a6a8e9db3eaf84497d4f0186fdc7094aabc07641c) | Receipt success; inner call reached the prototype, transferred exactly `10000` USDC base units from payer to recipient, emitted the exact `InvoicePayment` event, retained zero USDC, and marked the reference used. |
 | V2 atomic approve + pay | **V2 PLAINTEXT MEMO RUNTIME PASS** | [`0x50bf570b270f5d81dcfc18c19877f5181adbe19fa114c4ddb8e9cdc290db8615`](https://testnet.arcscan.app/tx/0x50bf570b270f5d81dcfc18c19877f5181adbe19fa114c4ddb8e9cdc290db8615) | One Circle UCW confirmation and one ERC-4337 UserOperation executed exact `approve` then `pay`. `InvoicePayment` contains `ARK-PROTOTYPE-V2-001` and plaintext `Thanks Miley`; retained USDC and final allowance are both zero. |
 | Example plaintext Memo reference | Runtime-audited | [`0x50bf570b270f5d81dcfc18c19877f5181adbe19fa114c4ddb8e9cdc290db8615`](https://testnet.arcscan.app/tx/0x50bf570b270f5d81dcfc18c19877f5181adbe19fa114c4ddb8e9cdc290db8615) | Audit in Arcscan via **Transaction → Logs → Address ArklakeInvoicePaymentPrototype → InvoicePayment**. Arcscan directly decodes `paymentReference = ARK-PROTOTYPE-V2-001` and `memo = Thanks Miley`. |
-| Production verification | Pending / not yet created | None | Cannot be recorded before a separately reviewed production integration exists. |
+| Production Scan to Pay verification | **PRODUCTION PASS** | [`0x129caf8dff19f5502a6753e0549d696e2345f952c98fcd62a6fea43a6e173c81`](https://testnet.arcscan.app/tx/0x129caf8dff19f5502a6753e0549d696e2345f952c98fcd62a6fea43a6e173c81) | Production invoice `ARK-20260913-BD68354E` paid 5 USDC through V2. Strict verification matched the payer, recipient, canonical USDC, amount, reference, and plaintext Memo `Cascade` before Paid. |
 
 ## 7. Source-of-truth links
 
@@ -98,13 +98,14 @@ Repository: [duck131199/arklake](https://github.com/duck131199/arklake)
 - On-chain Invoice Reference Prototype 0 completed code review, Solidity 0.8.24 compilation, and Foundry tests.
 - On-chain Invoice Reference Prototype 0 was deployed on Arc Testnet by the project-owner wallet. Its deployment receipt, contract address, runtime bytecode, and canonical USDC constant passed post-deploy RPC audit.
 - Prototype V1 source and ABI were verified, and its sequential and atomic experiments remain preserved as historical R&D evidence.
-- Prototype V2 was deployed at `0x7Ef8D661e800ec959daAaE67A8bD4fAaAe3A43D7`. Circle UCW atomic exact approval plus payment passed runtime audit in transaction `0x50bf570b270f5d81dcfc18c19877f5181adbe19fa114c4ddb8e9cdc290db8615`; Arcscan directly decodes `ARK-PROTOTYPE-V2-001` and plaintext Memo `Thanks Miley`. Production payment and verifier wiring remain pending.
+- Prototype V2 was deployed at `0x7Ef8D661e800ec959daAaE67A8bD4fAaAe3A43D7`. Circle UCW atomic exact approval plus payment passed runtime audit in transaction `0x50bf570b270f5d81dcfc18c19877f5181adbe19fa114c4ddb8e9cdc290db8615`; Arcscan directly decodes `ARK-PROTOTYPE-V2-001` and plaintext Memo `Thanks Miley`.
+- Pay with Arklake, Connect Wallet, and Scan to Pay were subsequently wired to the V2 contract and strict verifier. Production Connect Wallet and Scan to Pay runtime evidence passed; the recorded Scan proof is `0x129caf8dff19f5502a6753e0549d696e2345f952c98fcd62a6fea43a6e173c81`.
 
 ## 9. Guardrails
 
-- A prototype contract is not a production payment contract.
-- A successful testnet deployment does not mean the contract is production-wired.
-- Direct canonical USDC transfer remains the current production invoice payment behavior.
+- Production wiring of this testnet prototype does not make it an audited mainnet production contract.
+- A successful testnet deployment alone does not mean a contract is production-wired; wiring status requires separate application and runtime evidence.
+- Current invoice payments use the V2 contract. Regular non-invoice wallet Send remains a direct canonical USDC transfer.
 - **Submitted does not mean Paid.** Only strict verification may complete the Paid transition.
 - Do not add a contract address, deployer, deployment transaction, or proof transaction here until the corresponding runtime evidence has been verified.
 - Do not present infrastructure contracts such as canonical USDC, Circle wallet contracts, or ERC-4337 entry points as Arklake-owned contracts.
