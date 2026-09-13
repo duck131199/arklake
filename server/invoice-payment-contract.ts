@@ -67,3 +67,11 @@ export function buildArklakeInvoicePaymentBatch(input: {
     [arklakeInvoicePaymentV2Address, '0', pay],
   ]]
 }
+
+export function buildArklakeInvoicePaymentCalls(input: Parameters<typeof buildArklakeInvoicePaymentBatch>[0]) {
+  return buildArklakeInvoicePaymentBatch(input)[0].map(([to, value, data]) => ({
+    to: to as `0x${string}`,
+    value: BigInt(value),
+    data: data as `0x${string}`,
+  }))
+}

@@ -56,11 +56,11 @@ test('pending confirmations time out without reporting Paid', async () => {
   assert.equal(calls, 2)
 })
 
-test('both direct payment rails automatically verify and reload the invoice', () => {
+test('both app and external-wallet payment rails automatically verify and reload the invoice', () => {
   const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
   assert.match(app, /intentId: arklakePaymentIntent\?\.id, intentToken: arklakePaymentIntent\?\.token/)
   assert.match(app, /await confirmArklakePayment\(arklakePaymentIntent, txHash\)/)
-  assert.match(app, /submitExternalUsdcPayment[\s\S]+bindInvoicePaymentIntent\(externalPaymentIntent, hash\)[\s\S]+autoVerifyInvoicePayment\(\{ invoiceId, txHash: hash, intentId: externalPaymentIntent\.id, intentToken: externalPaymentIntent\.token \}\)[\s\S]+await loadInvoice\(\)/)
+  assert.match(app, /submitExternalInvoicePayment[\s\S]+bindInvoicePaymentIntent\(externalPaymentIntent, hash\)[\s\S]+autoVerifyInvoicePayment\(\{ invoiceId, txHash: hash, intentId: externalPaymentIntent\.id, intentToken: externalPaymentIntent\.token \}\)[\s\S]+await loadInvoice\(\)/)
   assert.doesNotMatch(app, /paymentOption === '(?:arklake|wallet)'[\s\S]{0,1200}(?:Transaction hash|Verify payment)/)
 })
 

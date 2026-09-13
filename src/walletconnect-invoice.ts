@@ -8,6 +8,7 @@ export type InvoicePaymentIntent = {
   token: string
   invoiceId: string
   invoiceNumber: string
+  memo: string
   recipientAddress: string
   amount: string
   asset: string
@@ -15,7 +16,7 @@ export type InvoicePaymentIntent = {
   expiresAt: string
 }
 
-export async function createInvoicePaymentIntent(invoiceId: string, fetcher: typeof fetch = fetch, paymentRail: 'generic' | 'arklake' = 'generic') {
+export async function createInvoicePaymentIntent(invoiceId: string, fetcher: typeof fetch = fetch, paymentRail: 'generic' | 'arklake' | 'wallet' = 'generic') {
   const response = await fetcher('/api/invoice-payment-intent', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'create', invoiceId, paymentRail }),
   })

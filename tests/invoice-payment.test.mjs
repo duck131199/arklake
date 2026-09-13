@@ -37,7 +37,8 @@ test('Pay with Arklake preserves the current UI and only the strict verifier can
 
 test('connect wallet and WalletConnect scan both use strict auto verification', () => {
   assert.match(app, /connectInvoiceWallet/)
-  assert.match(app, /submitExternalUsdcPayment/)
+  assert.match(app, /createInvoicePaymentIntent\(invoiceId, fetch, 'wallet'\)/)
+  assert.match(app, /submitExternalInvoicePayment/)
   assert.match(app, /bindInvoicePaymentIntent\(externalPaymentIntent, hash\)/)
   assert.match(app, /autoVerifyInvoicePayment\(\{ invoiceId, txHash: hash, intentId: externalPaymentIntent\.id, intentToken: externalPaymentIntent\.token \}\)/)
   assert.match(app, /createInvoicePaymentIntent\(invoiceId\)/)

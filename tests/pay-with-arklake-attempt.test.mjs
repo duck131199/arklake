@@ -52,8 +52,13 @@ test('only Circle terminal failure releases the unresolved attempt lock', () => 
   assert.doesNotMatch(migration, /updated_at <|interval.*failed/i)
 })
 
-test('Connect wallet and Scan paths remain generic and use their existing bind flow', () => {
-  assert.match(app, /createInvoicePaymentIntent\(invoiceId\)/)
+test('Connect wallet uses its authenticated V2 intent while Scan keeps the generic direct bind flow', () => {
+  assert.match(app, /createInvoicePaymentIntent\(invoiceId, fetch, 'wallet'\)/)
   assert.match(app, /bindInvoicePaymentIntent\(externalPaymentIntent, hash\)/)
   assert.match(app, /submitWalletConnectIntent/)
+  assert.match(app, /createInvoicePaymentIntent\(invoiceId\)/)
+  assert.match(intentApi, /requestedRail === 'wallet' \? 'wallet\.' : ''/)
+  assert.match(intentApi, /select\('id,invoice_number,memo,receiving_wallet_address,amount,asset,status,expires_at'\)/)
+  assert.match(intentApi, /invoiceNumber: invoice\.invoice_number, memo: invoice\.memo \|\| ''/)
+  assert.match(intentApi, /const paymentRail = requestedRail === 'arklake' \? 'arklake' : 'generic'/)
 })

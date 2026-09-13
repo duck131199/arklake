@@ -4,7 +4,7 @@ import { invoicePaymentChainId, normalizePaymentTxHash } from '../server/invoice
 
 type VercelRequest = { method?: string; body?: unknown; query?: Record<string, string | string[] | undefined> }
 type VercelResponse = { status: (code: number) => VercelResponse; json: (body: object) => unknown; setHeader: (name: string, value: string) => void }
-type Invoice = { id: string; invoice_number: string; receiving_wallet_address: string; amount: string | number; asset: string; status: string; expires_at: string }
+type Invoice = { id: string; invoice_number: string; memo: string | null; receiving_wallet_address: string; amount: string | number; asset: string; status: string; expires_at: string }
 
 const required = (name: string) => { const value = process.env[name]; if (!value) throw new Error(`${name} is not configured`); return value }
 const supabaseClient = () => createClient(required('SUPABASE_URL'), required('SUPABASE_SERVICE_ROLE_KEY'), { auth: { persistSession: false, autoRefreshToken: false } })
@@ -18,12 +18,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const supabase = supabaseClient()
     if (req.method === 'POST' && body.action === 'create') {
       const invoiceId = typeof body.invoiceId === 'string' ? body.invoiceId : ''
-      const paymentRail = body.paymentRail === 'arklake' ? 'arklake' : 'generic'
+      const requestedRail = body.paymentRail === 'arklake' ? 'arklake' : body.paymentRail === 'wallet' ? 'wallet' : 'generic'
+      const paymentRail = requestedRail === 'arklake' ? 'arklake' : 'generic'
       if (!uuid.test(invoiceId)) return res.status(400).json({ error: 'Invalid invoice.' })
       const now = new Date().toISOString()
       await supabase.from('invoices').update({ status: 'expired', updated_at: now }).eq('id', invoiceId).eq('status', 'active').lte('expires_at', now)
       const { data: invoice, error } = await supabase.from('invoices')
-        .select('id,invoice_number,receiving_wallet_address,amount,asset,status,expires_at').eq('id', invoiceId).maybeSingle<Invoice>()
+        .select('id,invoice_number,memo,receiving_wallet_address,amount,asset,status,expires_at').eq('id', invoiceId).maybeSingle<Invoice>()
       if (error) throw error
       if (!invoice) return res.status(404).json({ error: 'Invoice not found.' })
       if (invoice.status !== 'active' || new Date(invoice.expires_at).getTime() <= Date.now()) return res.status(409).json({ error: 'This invoice is not payable.' })
@@ -35,7 +36,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (existingError) throw existingError
         if (existing?.length) return res.status(409).json({ error: 'A payment is already being confirmed for this invoice.', paymentInProgress: true })
       }
-      const token = randomBytes(32).toString('base64url')
+      const token = `${requestedRail === 'wallet' ? 'wallet.' : ''}${randomBytes(32).toString('base64url')}`
       const { data: intent, error: insertError } = await supabase.from('invoice_payment_intents').insert({
         invoice_id: invoice.id,
         public_token_hash: tokenHash(token),
@@ -48,7 +49,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }).select('id').single<{ id: string }>()
       if (insertError) throw insertError
       return res.status(201).json({ intent: {
-        id: intent.id, token, invoiceId: invoice.id, invoiceNumber: invoice.invoice_number,
+        id: intent.id, token, invoiceId: invoice.id, invoiceNumber: invoice.invoice_number, memo: invoice.memo || '',
         recipientAddress: invoice.receiving_wallet_address, amount: String(invoice.amount), asset: invoice.asset,
         chainId: invoicePaymentChainId, expiresAt: invoice.expires_at,
       } })

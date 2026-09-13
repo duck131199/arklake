@@ -15,7 +15,7 @@ export type InvoicePaymentReceipt = {
   blockNumber?: string
   logs?: Array<{ address?: string; topics?: string[]; data?: string }>
 }
-export type ArklakeInvoicePaymentProof = { payerAddress: string; paymentReference: string; memo: string }
+export type ArklakeInvoicePaymentProof = { payerAddress?: string; paymentReference: string; memo: string }
 
 export function normalizePaymentTxHash(value: unknown) {
   if (typeof value !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(value.trim())) return null
@@ -66,6 +66,36 @@ export function verifyInvoicePaymentReceipt(input: {
   const canonicalTransfers = (input.receipt.logs || []).filter((log) => log.address?.toLowerCase() === invoicePaymentUsdcAddress
     && log.topics?.[0]?.toLowerCase() === erc20TransferTopic)
   if (input.arklakeProof) {
+    if (!input.arklakeProof.payerAddress) {
+      const referenceHash = keccak256(stringToHex(input.arklakeProof.paymentReference))
+      const proofLogs = (input.receipt.logs || []).filter((log) => log.address?.toLowerCase() === arklakeInvoicePaymentV2Address
+        && log.topics?.[0]?.toLowerCase() === invoicePaymentEventTopic)
+      const decoded = proofLogs.flatMap((log) => {
+        try {
+          const [token, amount, paymentReference, memo] = decodeAbiParameters(invoicePaymentEventDataAbi, log.data as `0x${string}`)
+          return [{
+            referenceHash: log.topics?.[1]?.toLowerCase(), payer: topicAddress(log.topics?.[2]), recipient: topicAddress(log.topics?.[3]),
+            token: token.toLowerCase(), amount, paymentReference, memo,
+          }]
+        } catch { return [] }
+      })
+      const proof = decoded.find((event) => event.recipient === recipient && event.token === invoicePaymentUsdcAddress
+        && event.amount === expectedAmount && event.referenceHash === referenceHash.toLowerCase()
+        && event.paymentReference === input.arklakeProof?.paymentReference && event.memo === input.arklakeProof?.memo)
+      if (!proofLogs.length) return { ok: false, reason: 'missing-invoice-event' } as const
+      if (!proof) {
+        if (!decoded.some((event) => event.recipient === recipient)) return { ok: false, reason: 'wrong-recipient' } as const
+        if (!decoded.some((event) => event.recipient === recipient && event.token === invoicePaymentUsdcAddress)) return { ok: false, reason: 'wrong-token' } as const
+        if (!decoded.some((event) => event.recipient === recipient && event.token === invoicePaymentUsdcAddress && event.amount === expectedAmount)) return { ok: false, reason: 'wrong-amount' } as const
+        if (!decoded.some((event) => event.recipient === recipient && event.token === invoicePaymentUsdcAddress && event.amount === expectedAmount
+          && event.referenceHash === referenceHash.toLowerCase() && event.paymentReference === input.arklakeProof?.paymentReference)) return { ok: false, reason: 'wrong-reference' } as const
+        return { ok: false, reason: 'wrong-memo' } as const
+      }
+      const exactTransfer = canonicalTransfers.some((log) => topicAddress(log.topics?.[1]) === proof.payer
+        && topicAddress(log.topics?.[2]) === recipient && hexBigInt(log.data) === expectedAmount)
+      if (!exactTransfer) return { ok: false, reason: canonicalTransfers.length ? 'wrong-payer' : 'wrong-token' } as const
+      return { ok: true, receiptBlock: Number(receiptBlock), confirmations: Number(latestBlock - receiptBlock + 1n), paidAt: new Date(paidAt).toISOString() } as const
+    }
     const payer = input.arklakeProof.payerAddress.toLowerCase()
     if (!/^0x[0-9a-f]{40}$/.test(payer)) return { ok: false, reason: 'invalid-invoice' } as const
     const exactTransfer = canonicalTransfers.some((log) => topicAddress(log.topics?.[1]) === payer

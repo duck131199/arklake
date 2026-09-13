@@ -4,7 +4,7 @@ import SwapFlow from './SwapFlow'
 import { autoVerifyInvoicePayment, CirclePaymentResolutionError, resolveCirclePaymentTxHash } from './invoice-payment-auto-confirm'
 import { bindInvoicePaymentIntent, connectInvoiceWalletConnect, createInvoicePaymentIntent, getArklakePaymentIntentStatus, submitWalletConnectIntent, walletConnectErrorMessage, type InvoicePaymentIntent } from './walletconnect-invoice'
 import type { W3SSdk as CircleW3SSdk } from '@circle-fin/w3s-pw-web-sdk'
-import { arcTestnetChainIdHex, connectExternalWallet, externalUsdcAmount, externalWalletError, readExternalUsdcBalance, submitExternalUsdcPayment, switchExternalWalletToArc, type ExternalWalletProvider } from './external-wallet'
+import { arcTestnetChainIdHex, connectExternalWallet, externalUsdcAmount, externalWalletError, readExternalUsdcBalance, submitExternalInvoicePayment, switchExternalWalletToArc, type ExternalWalletProvider } from './external-wallet'
 import { runBoundedVisiblePoll } from './wallet-refresh'
 
 const shellWidth = 'site-shell'
@@ -3034,7 +3034,7 @@ function PublicInvoicePage({ invoiceId, sessionStatus, wallet, balances, circleA
     }
     setExternalStatus('connecting')
     try {
-      const [connected, target, intent] = await Promise.all([connectExternalWallet(provider), loadPaymentTarget(), createInvoicePaymentIntent(invoiceId)])
+      const [connected, target, intent] = await Promise.all([connectExternalWallet(provider), loadPaymentTarget(), createInvoicePaymentIntent(invoiceId, fetch, 'wallet')])
       if (connected.address.toLowerCase() === target.recipientAddress.toLowerCase()) throw new Error('This invoice cannot be paid from its receiving wallet.')
       setPaymentTarget(target)
       setExternalPaymentIntent(intent)
@@ -3091,7 +3091,19 @@ function PublicInvoicePage({ invoiceId, sessionStatus, wallet, balances, circleA
         setExternalWallet({ ...externalWallet, balance: currentBalance.amount, rawBalance: currentBalance.raw })
         throw new Error(`Insufficient USDC balance. Available: ${currentBalance.amount} USDC.`)
       }
-      const hash = await submitExternalUsdcPayment(externalWallet.provider, externalWallet.address, paymentTarget.recipientAddress, paymentTarget.amount)
+      if (externalPaymentIntent.invoiceNumber !== paymentTarget.invoiceNumber
+        || externalPaymentIntent.recipientAddress.toLowerCase() !== paymentTarget.recipientAddress.toLowerCase()
+        || externalPaymentIntent.amount !== paymentTarget.amount || externalPaymentIntent.asset !== paymentTarget.asset) {
+        throw new Error('Payment details changed. Reconnect your wallet and review the invoice again.')
+      }
+      const { txHash: hash } = await submitExternalInvoicePayment({
+        provider: externalWallet.provider,
+        payer: externalWallet.address,
+        recipient: externalPaymentIntent.recipientAddress,
+        amount: externalPaymentIntent.amount,
+        invoiceNumber: externalPaymentIntent.invoiceNumber,
+        memo: externalPaymentIntent.memo,
+      })
       submitted = true
       setPaymentTxHash(hash)
       setExternalStatus('submitted')

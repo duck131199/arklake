@@ -87,7 +87,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     ])
     const receipt = receiptValue as InvoicePaymentReceipt | null
     const block = receipt?.blockNumber ? await rpc('eth_getBlockByNumber', [receipt.blockNumber, false]) as { timestamp?: string } | null : null
-    let arklakeProof: { payerAddress: string; paymentReference: string; memo: string } | undefined
+    let arklakeProof: { payerAddress?: string; paymentReference: string; memo: string } | undefined
     if (intent.payment_rail === 'arklake') {
       if (!intent.payer_wallet_id) return res.status(409).json({ error: 'This Pay with Arklake attempt has no bound payer wallet.' })
       const { data: payerWallet, error: payerWalletError } = await supabase.from('arklake_wallets')
@@ -96,6 +96,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (payerWalletError) throw payerWalletError
       if (!payerWallet) return res.status(409).json({ error: 'The Pay with Arklake payer wallet could not be verified.' })
       arklakeProof = { payerAddress: payerWallet.address, paymentReference: invoice.invoice_number, memo: invoice.memo || '' }
+    } else if (intentToken.startsWith('wallet.')) {
+      arklakeProof = { paymentReference: invoice.invoice_number, memo: invoice.memo || '' }
     }
     const verified = verifyInvoicePaymentReceipt({
       chainId: String(chainId || ''), latestBlock: String(latestBlock || ''), blockTimestamp: String(block?.timestamp || ''), receipt,

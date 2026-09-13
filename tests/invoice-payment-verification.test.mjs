@@ -94,6 +94,13 @@ test('Pay with Arklake requires the exact V2 InvoicePayment proof and payer tran
   assert.deepEqual(validArklake({ receipt: { status: '0x1', blockNumber: '0x64', logs: [transfer(), invoiceEvent({ amount: 999_999n })] } }), { ok: false, reason: 'wrong-amount' })
 })
 
+test('Connect Wallet infers the exact payer from V2 proof and requires its matching USDC transfer', () => {
+  const proof = { paymentReference: reference, memo }
+  assert.equal(valid({ receipt: { status: '0x1', blockNumber: '0x64', logs: [transfer(), invoiceEvent()] }, arklakeProof: proof }).ok, true)
+  assert.deepEqual(valid({ receipt: { status: '0x1', blockNumber: '0x64', logs: [transfer(), invoiceEvent({ eventPayer: '0x3333333333333333333333333333333333333333' })] }, arklakeProof: proof }), { ok: false, reason: 'wrong-payer' })
+  assert.deepEqual(valid({ receipt: { status: '0x1', blockNumber: '0x64', logs: [transfer()] }, arklakeProof: proof }), { ok: false, reason: 'missing-invoice-event' })
+})
+
 test('API verifies on-chain before invoking the atomic Paid transition', () => {
   const api = readFileSync(new URL('../api/invoice-payment-verify.ts', import.meta.url), 'utf8')
   const verification = api.indexOf('const verified = verifyInvoicePaymentReceipt')
@@ -104,6 +111,7 @@ test('API verifies on-chain before invoking the atomic Paid transition', () => {
   assert.match(api, /rpc\('eth_blockNumber'\)/)
   assert.match(api, /rpc\('eth_getBlockByNumber'/)
   assert.match(api, /payment_rail === 'arklake'/)
+  assert.match(api, /intentToken\.startsWith\('wallet\.'\)/)
   assert.match(api, /paymentReference: invoice\.invoice_number, memo: invoice\.memo \|\| ''/)
   assert.doesNotMatch(api, /wallet balance|activity-sync|createTransferTransaction/i)
 })
