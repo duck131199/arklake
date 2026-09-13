@@ -24,6 +24,11 @@ export const arcTestnetCanonicalTokens: TokenDetails[] = [
   { id: 'arc-testnet-cirbtc', symbol: 'cirBTC', tokenAddress: '0xf0C4a4CE82A5746AbAAd9425360Ab04fbBA432BF', decimals: 8 },
 ]
 
+export const arcTestnetActivityTokens: TokenDetails[] = [
+  ...arcTestnetCanonicalTokens,
+  { id: 'arc-testnet-native-usdc', symbol: 'USDC', tokenAddress: '0xfffffffffffffffffffffffffffffffffffffffe', decimals: 18 },
+]
+
 export type ArcTransferLog = { address: string; data: string; logIndex: string; topics: string[] }
 
 const transferTopic = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'

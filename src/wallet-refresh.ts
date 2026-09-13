@@ -1,5 +1,25 @@
 export type BoundedPollResult = 'found' | 'timeout' | 'hidden' | 'cancelled'
 
+type RefreshActivity = {
+  id: string
+  type: string
+  status: string
+}
+
+export function hasNewConfirmedReceive(previous: RefreshActivity[], next: RefreshActivity[]) {
+  const previouslyConfirmedReceiveIds = new Set(
+    previous
+      .filter((activity) => activity.type === 'receive' && activity.status === 'confirmed')
+      .map((activity) => activity.id),
+  )
+
+  return next.some((activity) => (
+    activity.type === 'receive'
+    && activity.status === 'confirmed'
+    && !previouslyConfirmedReceiveIds.has(activity.id)
+  ))
+}
+
 export async function runBoundedVisiblePoll(options: {
   check: () => Promise<boolean>
   isVisible: () => boolean

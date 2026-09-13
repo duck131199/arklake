@@ -9,7 +9,7 @@ const context = vm.createContext({ Date, Map, Set })
 const module = new vm.SourceTextModule(source, { context })
 await module.link(() => { throw new Error('Unexpected import') })
 await module.evaluate()
-const { arcTestnetCanonicalTokens, decodeArcTransferLegs, normalizeCircleTransactions } = module.namespace
+const { arcTestnetActivityTokens, arcTestnetCanonicalTokens, decodeArcTransferLegs, normalizeCircleTransactions } = module.namespace
 
 const emailSource = stripTypeScriptTypes(readFileSync(new URL('../server/circle/activity-email.ts', import.meta.url), 'utf8'))
 const emailModule = new vm.SourceTextModule(emailSource, { context })
@@ -122,6 +122,19 @@ test('canonical receipt decoding preserves pure cirBTC, USDC, and EURC receives'
   }
 })
 
+test('Arc native USDC transfer is decoded as Receive without changing canonical invoice USDC', () => {
+  const nativeUsdc = arcTestnetActivityTokens.find((item) => item.id === 'arc-testnet-native-usdc')
+  assert.equal(nativeUsdc.tokenAddress, '0xfffffffffffffffffffffffffffffffffffffffe')
+  assert.equal(nativeUsdc.decimals, 18)
+  assert.equal(token('USDC').tokenAddress, '0x3600000000000000000000000000000000000000')
+  const legs = decodeArcTransferLegs(
+    [transferLog(nativeUsdc, router, wallet, 1000000000000000000n, 1)],
+    wallet,
+    new Map(arcTestnetActivityTokens.map((item) => [item.id, item])),
+  )
+  assert.deepEqual(legs.map((leg) => [leg.direction, leg.amount, leg.tokenSymbol]), [['in', '1', 'USDC']])
+})
+
 test('reuses an unambiguous Circle leg when its token ID has no resolvable contract metadata', () => {
   const hash = '0xnativealias'
   const transactions = [
@@ -224,12 +237,20 @@ test('transaction email activation cutoff suppresses history and fails closed', 
   assert.doesNotMatch(migration, /outbox\.status\s*=\s*'sent'/)
 })
 
+test('Arc-confirmed activity emails do not wait for Circle indexing', () => {
+  const syncSource = readFileSync(new URL('../api/circle/activity-sync.ts', import.meta.url), 'utf8')
+  assert.match(syncSource, /persistArcActivities\([\s\S]*emailEnabledAt: number \| null/)
+  assert.match(syncSource, /for \(const activity of scanned\.activities\)[\s\S]*notificationStatus\([\s\S]*wallet_activity_notification_outbox[\s\S]*onConflict: 'activity_id,channel', ignoreDuplicates: true/)
+  assert.match(syncSource, /req\.query\?\.mode === 'arc'[\s\S]*persistArcActivities\([\s\S]*deliverActivityEmails\(supabase, session\.account_id, emailEnabledAt\)/)
+  assert.match(syncSource, /async function notificationStatus[\s\S]*Activity predates transaction email activation[\s\S]*Invoice payment notification is sent by the invoice email flow/)
+})
+
 test('notification jobs are isolated to their owning account', () => {
   assert.equal(notificationBelongsToAccount('account-a', 'account-a'), true)
   assert.equal(notificationBelongsToAccount('account-b', 'account-a'), false)
   const syncSource = readFileSync(new URL('../api/circle/activity-sync.ts', import.meta.url), 'utf8')
   assert.match(syncSource, /select\('id,account_id,activity_id,status,attempts'\)\.eq\('account_id', accountId\)/)
-  assert.equal((syncSource.match(/\.eq\('account_id', accountId\)/g) || []).length, 7)
+  assert.equal((syncSource.match(/\.eq\('account_id', accountId\)/g) || []).length, 8)
   assert.match(syncSource, /status: 'suppressed'[\s\S]*\.eq\('id', item\.id\)\.eq\('account_id', accountId\)\.eq\('status', 'sending'\)/)
 })
 

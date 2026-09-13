@@ -1,17 +1,18 @@
 import crypto from 'node:crypto'
 import { createClient } from '@supabase/supabase-js'
-import { decodeArcTransferLegs, normalizeCircleTransactions, type CircleTransaction, type OnchainLeg, type TokenDetails } from '../../server/circle/activity-core.js'
+import { arcTestnetActivityTokens, arcTestnetCanonicalTokens, decodeArcTransferLegs, normalizeCircleTransactions, type CircleTransaction, type OnchainLeg, type TokenDetails } from '../../server/circle/activity-core.js'
 import { activityEmail, activityEmailMaySend, notificationBelongsToAccount, notificationIdempotencyKey, transactionEmailActivationTime, transactionEmailEnabled, type EmailActivity } from '../../server/circle/activity-email.js'
 import { shouldSuppressGenericActivityEmail } from '../../server/circle/activity-email-suppression.js'
 import { arcTestnetChainIdHex, counterpartyActivityType, internalCounterpartyAddress, internalTransferUsdcAddress, reconciledDedupKey, reconciledLegKey, verifyInternalUsdcTransfer, type ArcReceipt } from '../../server/circle/internal-transfer.js'
 import { processInvoiceEmailOutbox } from '../../server/invoice-email.js'
 
-type VercelRequest = { method?: string; headers: { cookie?: string } }
+type VercelRequest = { method?: string; headers: { cookie?: string }; query?: Record<string, string | string[] | undefined> }
 type VercelResponse = { status: (code: number) => VercelResponse; json: (body: object) => unknown }
 
 const circleBaseUrl = 'https://api.circle.com/v1/w3s'
 const cookieName = 'arklake_session'
 const arcRpcUrl = 'https://rpc.testnet.arc.network'
+const transferTopic = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'
 
 type StoredSession = {
   sid: string
@@ -282,8 +283,191 @@ async function reconcileInternalTransfers(supabase: ReturnType<typeof supabaseCl
   return affectedAccounts
 }
 
+async function loadSavedActivities(supabase: ReturnType<typeof supabaseClient>, accountId: string) {
+  const { data: activityRows, error: activityError } = await supabase.from('wallet_activities')
+    .select('id,activity_type,status,blockchain,tx_hash,source_address,destination_address,occurred_at,confirmed_at,raw_circle')
+    .eq('account_id', accountId).order('occurred_at', { ascending: false }).limit(50)
+  if (activityError || !activityRows) throw new Error('Unable to load saved wallet activities')
+  const activityIds = activityRows.map((activity: { id: string }) => activity.id)
+  const { data: legRows, error: legError } = activityIds.length
+    ? await supabase.from('wallet_activity_legs')
+      .select('activity_id,direction,amount,token_id,token_address,token_symbol,source_address,destination_address,log_index')
+      .in('activity_id', activityIds).order('log_index', { ascending: true })
+    : { data: [], error: null }
+  if (legError || !legRows) throw new Error('Unable to load saved wallet activity legs')
+  return activityRows.map((activity: {
+    id: string; activity_type: string; status: string; blockchain: string; tx_hash: string | null
+    source_address: string | null; destination_address: string | null; occurred_at: string; confirmed_at: string | null
+    raw_circle: CircleTransaction[]
+  }) => {
+    const fee = Array.isArray(activity.raw_circle)
+      ? activity.raw_circle.find((transaction) => typeof transaction.networkFee === 'string')?.networkFee || null
+      : null
+    return {
+      id: activity.id, type: activity.activity_type, status: activity.status, blockchain: activity.blockchain,
+      txHash: activity.tx_hash, sourceAddress: activity.source_address, destinationAddress: activity.destination_address,
+      occurredAt: activity.occurred_at, confirmedAt: activity.confirmed_at, networkFee: fee,
+      legs: legRows.filter((leg: { activity_id: string }) => leg.activity_id === activity.id).map((leg: {
+        direction: string; amount: string; token_id: string | null; token_address: string | null; token_symbol: string | null
+        source_address: string | null; destination_address: string | null
+      }) => ({
+        direction: leg.direction, amount: leg.amount, tokenId: leg.token_id, tokenAddress: leg.token_address,
+        symbol: leg.token_symbol, sourceAddress: leg.source_address, destinationAddress: leg.destination_address,
+      })),
+    }
+  })
+}
+
+async function arcRpc(method: string, params: unknown[], id: number) {
+  const response = await fetch(arcRpcUrl, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id, method, params }), signal: AbortSignal.timeout(10000),
+  })
+  const payload = await response.json().catch(() => null) as { result?: unknown } | null
+  if (!response.ok || payload?.result === undefined) throw new Error('Arc RPC read failed')
+  return payload.result
+}
+
+async function recentArcActivities(walletAddress: string, lastScannedBlock: number | null) {
+  const latestHex = await arcRpc('eth_blockNumber', [], 10) as string
+  const latest = Number(BigInt(latestHex))
+  const confirmedHead = Math.max(0, latest - 2)
+  const initialBlock = Math.max(0, confirmedHead - 20000)
+  const scanFrom = lastScannedBlock === null || lastScannedBlock < initialBlock
+    ? initialBlock
+    : Math.max(0, lastScannedBlock - 20)
+  const fromBlock = `0x${scanFrom.toString(16)}`
+  const toBlock = `0x${confirmedHead.toString(16)}`
+  const walletTopic = `0x${walletAddress.toLowerCase().replace(/^0x/, '').padStart(64, '0')}`
+  const tokenAddresses = arcTestnetCanonicalTokens.map((token) => token.tokenAddress)
+  const nativeUsdcAddress = arcTestnetActivityTokens.find((token) => token.id === 'arc-testnet-native-usdc')!.tokenAddress
+  const requests = [
+    arcRpc('eth_getLogs', [{ address: tokenAddresses, fromBlock, toBlock, topics: [transferTopic, walletTopic] }], 20),
+    arcRpc('eth_getLogs', [{ address: tokenAddresses, fromBlock, toBlock, topics: [transferTopic, null, walletTopic] }], 21),
+    arcRpc('eth_getLogs', [{ address: nativeUsdcAddress, fromBlock: `0x${initialBlock.toString(16)}`, toBlock, topics: [transferTopic, null, walletTopic] }], 22),
+  ]
+  const logs = (await Promise.all(requests)).flat() as Array<{ address: string; blockNumber: string; data: string; logIndex: string; transactionHash: string; topics: string[] }>
+  const hashes = [...new Set(logs.map((log) => log.transactionHash.toLowerCase()))]
+  const receiptResults = await Promise.allSettled(hashes.map(async (hash, index) => {
+    const receipt = await arcRpc('eth_getTransactionReceipt', [hash], 100 + index) as { status?: string; blockNumber?: string; logs?: Array<{ address: string; data: string; logIndex: string; topics: string[] }> } | null
+    if (!receipt || receipt.status !== '0x1' || !receipt.blockNumber || !Array.isArray(receipt.logs)) return null
+    const block = await arcRpc('eth_getBlockByNumber', [receipt.blockNumber, false], 200 + index) as { timestamp?: string } | null
+    const occurredAt = block?.timestamp ? new Date(Number(BigInt(block.timestamp)) * 1000).toISOString() : new Date().toISOString()
+    const tokenMap = new Map(arcTestnetActivityTokens.map((token) => [token.id, token]))
+    const legs = decodeArcTransferLegs(receipt.logs, walletAddress, tokenMap)
+    if (!legs.length) return null
+    const inbound = new Set(legs.filter((leg) => leg.direction === 'in').map((leg) => leg.tokenAddress))
+    const outbound = new Set(legs.filter((leg) => leg.direction === 'out').map((leg) => leg.tokenAddress))
+    const swap = inbound.size > 0 && outbound.size > 0 && [...inbound].some((token) => !outbound.has(token))
+    const type = swap ? 'swap' : legs.every((leg) => leg.direction === 'in') ? 'receive' : legs.every((leg) => leg.direction === 'out') ? 'send' : null
+    if (!type) return null
+    return {
+      id: `arc:${hash}`, type, status: 'confirmed', blockchain: 'ARC-TESTNET', txHash: hash,
+      sourceAddress: legs[0]?.sourceAddress || null, destinationAddress: legs[0]?.destinationAddress || null,
+      occurredAt, confirmedAt: occurredAt, networkFee: null,
+      legs: legs.map((leg) => ({ direction: leg.direction, amount: leg.amount, tokenId: leg.tokenId,
+        tokenAddress: leg.tokenAddress, symbol: leg.tokenSymbol, sourceAddress: leg.sourceAddress,
+        destinationAddress: leg.destinationAddress, logIndex: leg.logIndex })),
+    }
+  }))
+  if (receiptResults.some((result) => result.status === 'rejected')) throw new Error('Arc receipt read failed')
+  return { activities: receiptResults.flatMap((result) => result.status === 'fulfilled' && result.value ? [result.value] : []), confirmedHead }
+}
+
+async function persistArcActivities(
+  supabase: ReturnType<typeof supabaseClient>,
+  accountId: string,
+  wallet: { circle_wallet_id: string; address: string },
+  emailEnabledAt: number | null,
+) {
+  const { data: cursor, error: cursorError } = await supabase.from('wallet_activity_sync_cursors')
+    .select('last_scanned_block').eq('circle_wallet_id', wallet.circle_wallet_id)
+    .maybeSingle<{ last_scanned_block: number | string }>()
+  if (cursorError) throw new Error('Unable to load Arc activity cursor')
+  const lastScannedBlock = cursor ? Number(cursor.last_scanned_block) : null
+  const scanned = await recentArcActivities(wallet.address, Number.isSafeInteger(lastScannedBlock) ? lastScannedBlock : null)
+  if (scanned.activities.length) {
+    const rows = scanned.activities.map((activity) => ({
+      account_id: accountId,
+      circle_wallet_id: wallet.circle_wallet_id,
+      dedup_key: `${wallet.circle_wallet_id}:ARC-TESTNET:${activity.txHash}`,
+      circle_transaction_id: null,
+      circle_transaction_ids: [],
+      blockchain: 'ARC-TESTNET',
+      tx_hash: activity.txHash,
+      activity_type: activity.type,
+      status: 'confirmed',
+      circle_state: null,
+      operation: activity.type === 'swap' ? 'CONTRACT_EXECUTION' : 'TRANSFER',
+      source_address: activity.sourceAddress,
+      destination_address: activity.destinationAddress,
+      occurred_at: activity.occurredAt,
+      confirmed_at: activity.confirmedAt,
+      raw_circle: [],
+      updated_at: new Date().toISOString(),
+    }))
+    const { error: activityError } = await supabase.from('wallet_activities')
+      .upsert(rows, { onConflict: 'dedup_key', ignoreDuplicates: true })
+    if (activityError) throw new Error('Unable to persist Arc wallet activities')
+    const dedupKeys = rows.map((row) => row.dedup_key)
+    const { data: saved, error: savedError } = await supabase.from('wallet_activities')
+      .select('id,dedup_key,circle_transaction_id').in('dedup_key', dedupKeys)
+    if (savedError || !saved) throw new Error('Unable to resolve Arc wallet activities')
+    const arcPlaceholders = new Map(saved.flatMap((row: { id: string; dedup_key: string; circle_transaction_id: string | null }) => (
+      row.circle_transaction_id === null ? [[row.dedup_key, row.id] as const] : []
+    )))
+    const legs = scanned.activities.flatMap((activity) => {
+      const activityId = arcPlaceholders.get(`${wallet.circle_wallet_id}:ARC-TESTNET:${activity.txHash}`)
+      if (!activityId) return []
+      return activity.legs.map((leg) => ({
+      activity_id: activityId,
+      leg_key: `reconciled:${wallet.circle_wallet_id}:ARC-TESTNET:${activity.txHash}:log:${leg.logIndex}`,
+      direction: leg.direction,
+      amount: leg.amount,
+      token_id: leg.tokenId,
+      token_address: leg.tokenAddress,
+      token_symbol: leg.symbol,
+      token_decimals: arcTestnetActivityTokens.find((token) => token.tokenAddress?.toLowerCase() === leg.tokenAddress?.toLowerCase())?.decimals ?? null,
+      source_address: leg.sourceAddress,
+      destination_address: leg.destinationAddress,
+        log_index: leg.logIndex,
+        updated_at: new Date().toISOString(),
+      }))
+    })
+    if (legs.length) {
+      const { error: legsError } = await supabase.from('wallet_activity_legs').upsert(legs, { onConflict: 'leg_key' })
+      if (legsError) throw new Error('Unable to persist Arc wallet activity legs')
+    }
+    if (emailEnabledAt !== null) {
+      const savedByDedupKey = new Map(saved.map((row: { id: string; dedup_key: string }) => [row.dedup_key, row.id]))
+      const notifications = []
+      for (const activity of scanned.activities) {
+        const activityId = savedByDedupKey.get(`${wallet.circle_wallet_id}:ARC-TESTNET:${activity.txHash}`)
+        if (!activityId) continue
+        const state = await notificationStatus(supabase, {
+          activityType: activity.type,
+          txHash: activity.txHash,
+          confirmedAt: activity.confirmedAt,
+        }, emailEnabledAt)
+        notifications.push({ account_id: accountId, activity_id: activityId, channel: 'email', ...state })
+      }
+      if (notifications.length) {
+        const { error: outboxError } = await supabase.from('wallet_activity_notification_outbox')
+          .upsert(notifications, { onConflict: 'activity_id,channel', ignoreDuplicates: true })
+        if (outboxError) throw new Error('Unable to enqueue Arc wallet activity notifications')
+      }
+    }
+  }
+  const { error: advanceError } = await supabase.rpc('advance_wallet_activity_sync_cursor', {
+    p_circle_wallet_id: wallet.circle_wallet_id,
+    p_blockchain: 'ARC-TESTNET',
+    p_last_scanned_block: scanned.confirmedHead,
+  })
+  if (advanceError) throw new Error('Unable to advance Arc activity cursor')
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
+  if (req.method !== 'GET' && req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
   try {
     const sid = sessionId(req.headers.cookie)
     if (!sid) return res.status(401).json({ error: 'Arklake session is not active.' })
@@ -295,6 +479,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { data: wallet } = await supabase.from('arklake_wallets').select('circle_wallet_id,address')
       .eq('account_id', session.account_id).eq('blockchain', 'ARC-TESTNET').eq('account_type', 'SCA').maybeSingle<{ circle_wallet_id: string; address: string }>()
     if (!wallet) return res.status(404).json({ error: 'Arklake wallet was not found.' })
+
+    const emailEnabled = transactionEmailEnabled(process.env.ARKLAKE_TRANSACTION_EMAIL_ENABLED)
+    const emailEnabledAt = transactionEmailActivationTime(process.env.ARKLAKE_TRANSACTION_EMAIL_ENABLED_AT)
+    const emailDeliveryEnabled = emailEnabled && emailEnabledAt !== null
+
+    if (req.method === 'GET') {
+      const saved = await loadSavedActivities(supabase, session.account_id)
+      return res.status(200).json({ activities: saved })
+    }
+
+    if (req.query?.mode === 'arc') {
+      await persistArcActivities(supabase, session.account_id, wallet, emailDeliveryEnabled ? emailEnabledAt : null)
+      const notifications = emailDeliveryEnabled
+        ? await deliverActivityEmails(supabase, session.account_id, emailEnabledAt)
+        : { sent: 0, failed: 0 }
+      return res.status(200).json({ notifications: { enabled: emailDeliveryEnabled, ...notifications }, activities: await loadSavedActivities(supabase, session.account_id) })
+    }
 
     let userToken = session.circle_user_token
     let listed = await listTransactions(wallet.circle_wallet_id, userToken)
@@ -318,9 +519,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     for (const token of balanceTokens) tokens.set(token.id, { ...tokens.get(token.id), ...token })
     const receiptLegs = await swapReceiptLegs(listed.transactions, wallet.address, tokens)
     const activities = normalizeCircleTransactions(listed.transactions, tokens, wallet.circle_wallet_id, receiptLegs)
-    const emailEnabled = transactionEmailEnabled(process.env.ARKLAKE_TRANSACTION_EMAIL_ENABLED)
-    const emailEnabledAt = transactionEmailActivationTime(process.env.ARKLAKE_TRANSACTION_EMAIL_ENABLED_AT)
-    const emailDeliveryEnabled = emailEnabled && emailEnabledAt !== null
     if (activities.length) {
       const rows = activities.map((activity) => ({
         account_id: session.account_id, circle_wallet_id: wallet.circle_wallet_id, dedup_key: activity.dedupKey,
@@ -382,38 +580,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       from: process.env.RESEND_FROM_EMAIL,
       publicUrl: process.env.ARKLAKE_PUBLIC_URL,
     }).catch((error) => console.error('ARKLAKE_INVOICE_EMAIL_DELIVERY_FAILED', error instanceof Error ? error.message : 'Unknown error'))
-    const { data: activityRows, error: activityError } = await supabase.from('wallet_activities')
-      .select('id,activity_type,status,blockchain,tx_hash,source_address,destination_address,occurred_at,confirmed_at,raw_circle')
-      .eq('account_id', session.account_id).order('occurred_at', { ascending: false }).limit(50)
-    if (activityError || !activityRows) throw new Error('Unable to load saved wallet activities')
-    const activityIds = activityRows.map((activity: { id: string }) => activity.id)
-    const { data: legRows, error: legError } = activityIds.length
-      ? await supabase.from('wallet_activity_legs')
-        .select('activity_id,direction,amount,token_id,token_address,token_symbol,source_address,destination_address,log_index')
-        .in('activity_id', activityIds).order('log_index', { ascending: true })
-      : { data: [], error: null }
-    if (legError || !legRows) throw new Error('Unable to load saved wallet activity legs')
-    const publicActivities = activityRows.map((activity: {
-      id: string; activity_type: string; status: string; blockchain: string; tx_hash: string | null
-      source_address: string | null; destination_address: string | null; occurred_at: string; confirmed_at: string | null
-      raw_circle: CircleTransaction[]
-    }) => {
-      const fee = Array.isArray(activity.raw_circle)
-        ? activity.raw_circle.find((transaction) => typeof transaction.networkFee === 'string')?.networkFee || null
-        : null
-      return {
-        id: activity.id, type: activity.activity_type, status: activity.status, blockchain: activity.blockchain,
-        txHash: activity.tx_hash, sourceAddress: activity.source_address, destinationAddress: activity.destination_address,
-        occurredAt: activity.occurred_at, confirmedAt: activity.confirmed_at, networkFee: fee,
-        legs: legRows.filter((leg: { activity_id: string }) => leg.activity_id === activity.id).map((leg: {
-          direction: string; amount: string; token_id: string | null; token_address: string | null; token_symbol: string | null
-          source_address: string | null; destination_address: string | null
-        }) => ({
-          direction: leg.direction, amount: leg.amount, tokenId: leg.token_id, tokenAddress: leg.token_address,
-          symbol: leg.token_symbol, sourceAddress: leg.source_address, destinationAddress: leg.destination_address,
-        })),
-      }
-    })
+    const publicActivities = await loadSavedActivities(supabase, session.account_id)
     return res.status(200).json({ synced: activities.length, transactionsRead: listed.transactions.length, notifications, activities: publicActivities })
   } catch (error) {
     console.error('ARKLAKE_ACTIVITY_SYNC_FAILED', error instanceof Error ? error.message : 'Unknown error')

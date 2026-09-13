@@ -5,6 +5,8 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 const cookieName = 'arklake_session'
 const sessionTtlSeconds = 60 * 60 * 24 * 7
 const circleApiBaseUrl = 'https://api.circle.com/v1/w3s'
+const arcRpcUrl = 'https://rpc.testnet.arc.network'
+const canonicalArcUsdcAddress = '0x3600000000000000000000000000000000000000'
 
 type SessionPayload = {
   sid: string
@@ -225,6 +227,23 @@ async function listCircleBalances(userToken: string, walletId: string) {
   return { response, payload }
 }
 
+function formatUsdcUnits(value: bigint) {
+  const fraction = (value % 1_000_000n).toString().padStart(6, '0').replace(/0+$/, '')
+  return fraction ? `${value / 1_000_000n}.${fraction}` : (value / 1_000_000n).toString()
+}
+
+async function arcUsdcBalance(address: string) {
+  const data = `0x70a08231${address.toLowerCase().replace(/^0x/, '').padStart(64, '0')}`
+  const response = await fetch(arcRpcUrl, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_call', params: [{ to: canonicalArcUsdcAddress, data }, 'latest'] }),
+    signal: AbortSignal.timeout(10000),
+  })
+  const payload = await response.json().catch(() => null) as { result?: string } | null
+  if (!response.ok || !payload?.result || !/^0x[0-9a-f]+$/i.test(payload.result)) return null
+  return formatUsdcUnits(BigInt(payload.result))
+}
+
 async function getBootstrapSession(sid: string) {
   const supabase = getSupabaseClient()
   const { data: session, error: sessionError } = await supabase
@@ -266,6 +285,14 @@ async function getBootstrapSession(sid: string) {
 
   if (!balancesResult.response.ok || !Array.isArray(balancesResult.payload?.data?.tokenBalances)) return null
 
+  const balances = balancesResult.payload.data.tokenBalances.map(normalizeCircleTokenBalance)
+  const currentArcUsdc = await arcUsdcBalance(wallet.address).catch(() => null)
+  if (currentArcUsdc !== null) {
+    const canonical = balances.find((balance) => balance.tokenAddress?.toLowerCase() === canonicalArcUsdcAddress)
+    if (canonical) canonical.amount = currentArcUsdc
+    else balances.push({ amount: currentArcUsdc, tokenId: 'arc-testnet-usdc', name: 'USDC', symbol: 'USDC', blockchain: 'ARC-TESTNET', tokenAddress: canonicalArcUsdcAddress })
+  }
+
   return {
     authenticated: true,
     email: session.arklake_accounts.email,
@@ -275,7 +302,7 @@ async function getBootstrapSession(sid: string) {
       blockchain: wallet.blockchain,
       accountType: wallet.account_type,
     },
-    balances: balancesResult.payload.data.tokenBalances.map(normalizeCircleTokenBalance),
+    balances,
   }
 }
 
