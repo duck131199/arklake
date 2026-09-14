@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
+import { renderMultilineText } from './invoice-description'
 import SwapFlow from './SwapFlow'
 import { autoVerifyInvoicePayment, CirclePaymentResolutionError, resolveCirclePaymentTxHash } from './invoice-payment-auto-confirm'
 import { bindInvoicePaymentIntent, connectInvoiceWalletConnect, createInvoicePaymentIntent, disconnectInvoiceWalletConnect, getArklakePaymentIntentStatus, submitWalletConnectIntent, walletConnectErrorMessage, type InvoicePaymentIntent } from './walletconnect-invoice'
@@ -2517,7 +2518,7 @@ function AppCreateInvoicePage({ onCreateInvoice, onNavigate }: { onCreateInvoice
                   <span>{amount.trim()} USDC</span>
                 </span>
               </ReviewInvoiceRow>
-              {memo.trim() ? <ReviewInvoiceRow label="Description"><span className="whitespace-pre-wrap">{memo.trim()}</span></ReviewInvoiceRow> : null}
+              {memo.trim() ? <ReviewInvoiceRow label="Description"><span>{renderMultilineText(memo.trim())}</span></ReviewInvoiceRow> : null}
               <ReviewInvoiceRow label="Expiry">{expiry}</ReviewInvoiceRow>
             </div>
           </div>
