@@ -2033,12 +2033,7 @@ function AppHomePage({ onNavigate, balances, wallet, circleAuth, email, onBalanc
                     <p className="text-sm font-semibold text-slate">Available to pay</p>
                     <p className="mt-5 whitespace-nowrap text-[2.65rem] font-semibold leading-none tracking-[-0.065em] text-arklake-ink sm:text-5xl">{usdcBalance?.amount || '0.00'} USDC</p>
                   </div>
-                  <img
-                    className="mx-auto h-auto w-full max-w-[260px] shrink-0 object-contain sm:max-w-[310px] lg:h-[190px] lg:w-[310px]"
-                    src="/app/illustrations/wallet-hero.svg"
-                    alt=""
-                    aria-hidden="true"
-                  />
+                  <WalletHeroIllustration />
                 </div>
               </div>
 
@@ -3294,15 +3289,44 @@ function PublicInvoicePage({ invoiceId, sessionStatus, wallet, balances, circleA
   )
 }
 
+const TOKEN_LOGO_BY_SYMBOL: Record<string, string> = {
+  USDC: '/brand/tokens/usdc.png',
+  EURC: '/brand/tokens/eurc.png',
+  CIRBTC: '/brand/tokens/cirbtc.png',
+}
+
+function getTokenLogo(symbol: string) {
+  return TOKEN_LOGO_BY_SYMBOL[symbol.toUpperCase()]
+}
+
 function TokenIcon({ symbol, icon }: { symbol: string; icon?: string }) {
-  if (icon) {
-    return <img className="h-10 w-10 rounded-full" src={icon} alt="" aria-hidden="true" />
+  const [imageFailed, setImageFailed] = useState(false)
+
+  if (icon && !imageFailed) {
+    return <img className="h-10 w-10 rounded-full object-contain" src={icon} alt="" aria-hidden="true" onError={() => setImageFailed(true)} />
   }
 
   return (
     <span className="flex h-10 w-10 items-center justify-center rounded-full bg-aqua-mist text-xs font-semibold text-arklake-aqua" aria-hidden="true">
       {symbol.slice(0, 2)}
     </span>
+  )
+}
+
+function WalletHeroIllustration() {
+  return (
+    <div className="relative mx-auto w-full max-w-[260px] shrink-0 sm:max-w-[310px] lg:h-[190px] lg:w-[310px]">
+      <img className="h-auto w-full object-contain lg:h-[190px]" src="/app/illustrations/wallet-hero.svg" alt="" aria-hidden="true" />
+      <span className="absolute right-[8%] top-[4%] rounded-full border border-white/80 bg-white p-1 shadow-sm" aria-hidden="true">
+        <TokenIcon symbol="USDC" icon={getTokenLogo('USDC')} />
+      </span>
+      <span className="absolute bottom-[8%] right-[1%] rounded-full border border-white/80 bg-white p-1 shadow-sm" aria-hidden="true">
+        <TokenIcon symbol="EURC" icon={getTokenLogo('EURC')} />
+      </span>
+      <span className="absolute bottom-[2%] left-[8%] rounded-full border border-white/80 bg-white p-1 shadow-sm" aria-hidden="true">
+        <TokenIcon symbol="cirBTC" icon={getTokenLogo('cirBTC')} />
+      </span>
+    </div>
   )
 }
 
@@ -3910,7 +3934,7 @@ function AppWalletPage({ onNavigate, balances, wallet, circleAuth, email, onBala
               <p className="text-sm font-semibold text-slate">Available to pay</p>
               <p className="mt-5 whitespace-nowrap text-[2.35rem] font-semibold leading-none tracking-[-0.065em] text-arklake-ink sm:text-5xl">{usdcBalance?.amount || '0.00'} USDC</p>
             </div>
-            <img className="mx-auto h-auto w-full max-w-[260px] shrink-0 object-contain sm:max-w-[310px] lg:h-[190px] lg:w-[310px]" src="/app/illustrations/wallet-hero.svg" alt="" aria-hidden="true" />
+            <WalletHeroIllustration />
           </div>
         </div>
 
@@ -3965,7 +3989,7 @@ function AppWalletPage({ onNavigate, balances, wallet, circleAuth, email, onBala
               {userFacingBalances.map((asset) => (
                 <div key={`${asset.blockchain}-${asset.tokenId}`} className="flex items-center justify-between gap-3 py-4 first:pt-0 last:pb-0 sm:gap-4">
                   <div className="flex min-w-0 items-center gap-3">
-                    <TokenIcon symbol={asset.symbol} />
+                    <TokenIcon symbol={asset.symbol} icon={getTokenLogo(asset.symbol)} />
                     <div className="min-w-0">
                       <p className="font-semibold text-arklake-ink">{asset.symbol}</p>
                       <p className="mt-1 text-sm text-slate">{asset.name || asset.blockchain}</p>
