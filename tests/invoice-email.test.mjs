@@ -124,7 +124,7 @@ test('provider failure remains retryable and handlers isolate it from invoice st
   assert.match(activitySync, /processInvoiceEmailOutbox/)
 })
 
-test('new invoice template is complete and its QR contains only the public invoice URL', async () => {
+test('new invoice template keeps the public invoice CTA without a duplicate QR', async () => {
   const message = await renderInvoiceEmail('invoice_created', invoice, 'seller@example.com', 'payer@example.com', 'https://arklake.site')
   assert.equal(message.subject, 'You received an invoice')
   assert.match(message.text, /From: seller@example\.com/)
@@ -137,17 +137,11 @@ test('new invoice template is complete and its QR contains only the public invoi
   assert.match(message.text, /Expires:/)
   assert.match(message.text, /https:\/\/arklake\.site\/invoice\/11111111/)
   assert.match(message.html, /View &amp; pay invoice/)
-  assert.match(message.html, /cid:invoice-public-link-qr/)
-  assert.match(message.html, /width="108" height="108"/)
-  assert.match(message.html, /Open invoice in browser/)
+  assert.doesNotMatch(message.html, /cid:|<img[^>]+invoice-public-link-qr|Scan to open this invoice|Open invoice in browser/)
   assert.doesNotMatch(message.html, />https:\/\/arklake\.site\/invoice\//)
   assert.match(message.html, /Review the invoice details on Arklake before completing your payment\./)
   assert.match(message.text, /Sep 9, 2026 · 1:00 AM UTC/)
-  assert.equal(message.attachments?.length, 1)
-  assert.equal(message.attachments?.[0].content_id, 'invoice-public-link-qr')
-  assert.equal(message.attachments?.[0].content_type, 'image/png')
-  assert.equal('contentId' in message.attachments?.[0], false)
-  assert.ok(message.attachments?.[0].content.length > 100)
+  assert.equal(message.attachments, undefined)
   assert.doesNotMatch(message.text, /ethereum:|transfer\?|uint256=/)
   assert.equal(invoiceEmailIdempotencyKey(invoice.id, 'invoice_created'), `invoice-email-${invoice.id}-invoice_created`)
 })
