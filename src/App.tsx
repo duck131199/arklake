@@ -3790,20 +3790,34 @@ function AppWalletPage({ onNavigate, balances, wallet, circleAuth, email, onBala
   const [walletAction, setWalletAction] = useState<'receive' | 'send' | null>(() => loadPendingSendDraft()?.origin === 'wallet' ? 'send' : null)
   const [activities, setActivities] = useState<WalletActivity[]>([])
   const [activityStatus, setActivityStatus] = useState<'loading' | 'ready' | 'error'>('loading')
+  const [activityRefreshStatus, setActivityRefreshStatus] = useState<'idle' | 'refreshing' | 'error'>('idle')
   const [selectedActivity, setSelectedActivity] = useState<WalletActivity | null>(null)
   const [activityRefresh, setActivityRefresh] = useState(0)
   const activitiesRef = useRef<WalletActivity[]>([])
   const balancesRef = useRef(balances)
   const activityPollRef = useRef<AbortController | null>(null)
   const balancePollRef = useRef<AbortController | null>(null)
-  const activityReadInFlightRef = useRef(false)
+  const activityReadPromiseRef = useRef<Promise<{ activities: WalletActivity[]; newConfirmedReceive: boolean } | null> | null>(null)
+  const activityRefreshQueuedRef = useRef(false)
+  const activityRequestGenerationRef = useRef(0)
+  const activityMountedRef = useRef(true)
   const refreshInFlightRef = useRef(false)
   const hasActivityBaselineRef = useRef(false)
   const lastReturnRefreshRef = useRef(0)
 
   useEffect(() => { balancesRef.current = balances }, [balances])
 
-  const applyActivities = (nextActivities: WalletActivity[]) => {
+  useEffect(() => {
+    activityMountedRef.current = true
+    return () => {
+      activityMountedRef.current = false
+      ++activityRequestGenerationRef.current
+    }
+  }, [wallet?.id])
+
+  const applyActivities = (nextActivities: WalletActivity[], generation?: number) => {
+    if (!activityMountedRef.current) return null
+    if (generation !== undefined && generation !== activityRequestGenerationRef.current) return null
     const newConfirmedReceive = hasActivityBaselineRef.current && hasNewConfirmedReceive(activitiesRef.current, nextActivities)
     hasActivityBaselineRef.current = true
     activitiesRef.current = nextActivities
@@ -3813,25 +3827,50 @@ function AppWalletPage({ onNavigate, balances, wallet, circleAuth, email, onBala
     return { activities: nextActivities, newConfirmedReceive }
   }
 
+  const readSavedActivities = async (generation = ++activityRequestGenerationRef.current) => {
+    if (!wallet?.id) return null
+    const response = await fetch('/api/circle/activity-sync', { credentials: 'include', cache: 'no-store' })
+    const data = await response.json().catch(() => null) as { activities?: WalletActivity[]; error?: string } | null
+    if (!response.ok || !Array.isArray(data?.activities)) throw new Error(data?.error || 'Saved activity could not be loaded.')
+    return applyActivities(data.activities, generation)
+  }
+
   const loadSavedActivities = async () => {
-    if (!wallet?.id || activityReadInFlightRef.current) return null
-    activityReadInFlightRef.current = true
+    if (!wallet?.id) return null
+    const response = await fetch('/api/circle/activity-sync?mode=arc', { method: 'POST', credentials: 'include', cache: 'no-store' })
+    const data = await response.json().catch(() => null) as { error?: string } | null
+    if (!response.ok) throw new Error(data?.error || 'Activity could not be synced.')
+  }
+
+  const refreshSavedActivitiesAfterArc = async ({ queueIfBusy = false } = {}) => {
+    if (!activityMountedRef.current) return null
+    if (activityReadPromiseRef.current) {
+      if (!queueIfBusy) return activityReadPromiseRef.current
+      activityRefreshQueuedRef.current = true
+      await activityReadPromiseRef.current.catch(() => null)
+      if (!activityRefreshQueuedRef.current) return null
+      activityRefreshQueuedRef.current = false
+    }
+    if (!activityMountedRef.current) return null
+    const generation = ++activityRequestGenerationRef.current
+    const request = (async () => {
+      await loadSavedActivities().catch(() => null)
+      return readSavedActivities(generation)
+    })()
+    activityReadPromiseRef.current = request
     try {
-      const response = await fetch('/api/circle/activity-sync?mode=arc', { method: 'POST', credentials: 'include', cache: 'no-store' })
-      const data = await response.json().catch(() => null) as { activities?: WalletActivity[]; error?: string } | null
-      if (!response.ok || !Array.isArray(data?.activities)) throw new Error(data?.error || 'Activity could not be loaded.')
-      return applyActivities(data.activities)
+      return await request
     } finally {
-      activityReadInFlightRef.current = false
+      if (activityReadPromiseRef.current === request) activityReadPromiseRef.current = null
     }
   }
 
   const syncActivities = async () => {
     if (!wallet?.id) return null
     const response = await fetch('/api/circle/activity-sync', { method: 'POST' })
-    const data = await response.json().catch(() => null) as { activities?: WalletActivity[]; error?: string } | null
-    if (!response.ok || !Array.isArray(data?.activities)) throw new Error(data?.error || 'Activity could not be loaded.')
-    return applyActivities(data.activities)
+    const data = await response.json().catch(() => null) as { error?: string } | null
+    if (!response.ok) throw new Error(data?.error || 'Activity could not be synced.')
+    return activityReadPromiseRef.current || readSavedActivities()
   }
 
   const pollBalanceAfterReceive = (initialAmount = getUsdcBalance(balancesRef.current)?.amount || null) => {
@@ -3874,7 +3913,7 @@ function AppWalletPage({ onNavigate, balances, wallet, circleAuth, email, onBala
       timeoutMs: 60000,
       signal: controller.signal,
       isVisible: () => document.visibilityState === 'visible',
-      check: async () => Boolean((await loadSavedActivities())?.activities.some((activity) => activity.txHash?.toLowerCase() === txHash.toLowerCase())),
+      check: async () => Boolean((await refreshSavedActivitiesAfterArc())?.activities.some((activity) => activity.txHash?.toLowerCase() === txHash.toLowerCase())),
     }).catch(() => {})
   }
 
@@ -3885,33 +3924,62 @@ function AppWalletPage({ onNavigate, balances, wallet, circleAuth, email, onBala
       return
     }
     let cancelled = false
+    let activityInterval: number | undefined
     const pollRealtimeActivity = () => {
       if (document.visibilityState !== 'visible') return
-      void loadSavedActivities().then((result) => {
+      void refreshSavedActivitiesAfterArc().then((result) => {
         if (!cancelled && result?.newConfirmedReceive) pollBalanceAfterReceive()
       }).catch(() => {})
     }
-    setActivityStatus('loading')
-    loadSavedActivities()
+    const startActivityPolling = () => {
+      if (cancelled || activityInterval !== undefined) return
+      activityInterval = window.setInterval(pollRealtimeActivity, 5000)
+    }
+    const manualRefresh = activityRefresh > 0
+    const retainExistingActivities = activitiesRef.current.length > 0
+    if (retainExistingActivities) {
+      setActivityRefreshStatus('refreshing')
+    } else {
+      setActivityStatus('loading')
+      setActivityRefreshStatus('idle')
+    }
+    const initialRead = manualRefresh
+      ? refreshSavedActivitiesAfterArc({ queueIfBusy: true })
+      : readSavedActivities()
+    initialRead
       .then((result) => {
         if (cancelled) return
+        setActivityRefreshStatus('idle')
         if (result?.newConfirmedReceive) pollBalanceAfterReceive()
-        void syncActivities().then((synced) => {
-          if (!cancelled && synced?.newConfirmedReceive) pollBalanceAfterReceive()
+        const arcSync = manualRefresh ? Promise.resolve(result) : refreshSavedActivitiesAfterArc()
+        void arcSync.then((synced) => {
+          if (cancelled) return
+          if (synced?.newConfirmedReceive) pollBalanceAfterReceive()
+          return syncActivities().then((providerSynced) => {
+            if (!cancelled && providerSynced?.newConfirmedReceive) pollBalanceAfterReceive()
+          })
         }).catch(() => {})
       })
-      .catch(() => { if (!cancelled) setActivityStatus('error') })
-    const activityInterval = window.setInterval(pollRealtimeActivity, 5000)
+      .catch(() => {
+        if (cancelled) return
+        if (activitiesRef.current.length > 0) {
+          setActivityStatus('ready')
+          setActivityRefreshStatus('error')
+        } else {
+          setActivityStatus('error')
+        }
+      })
+      .finally(startActivityPolling)
     return () => {
       cancelled = true
-      window.clearInterval(activityInterval)
+      if (activityInterval !== undefined) window.clearInterval(activityInterval)
     }
   }, [wallet?.id, activityRefresh])
 
   useEffect(() => {
     const refreshOnReturn = () => {
       const now = Date.now()
-      if (document.visibilityState !== 'visible' || now - lastReturnRefreshRef.current < 1000) return
+      if (!hasActivityBaselineRef.current || document.visibilityState !== 'visible' || now - lastReturnRefreshRef.current < 1000) return
       lastReturnRefreshRef.current = now
       void refreshWalletOnce()
     }
@@ -4017,11 +4085,12 @@ function AppWalletPage({ onNavigate, balances, wallet, circleAuth, email, onBala
             <>
               <div className="flex items-center justify-between gap-3">
                 <h2 className="text-xl font-semibold tracking-[-0.04em] text-arklake-ink">Recent activity</h2>
-                {activityStatus === 'ready' ? <button type="button" className="text-sm font-semibold text-arklake-aqua" onClick={() => setActivityRefresh((value) => value + 1)}>Refresh</button> : null}
+                {activities.length > 0 ? <button type="button" className="text-sm font-semibold text-arklake-aqua disabled:cursor-wait disabled:opacity-60" disabled={activityRefreshStatus === 'refreshing'} onClick={() => setActivityRefresh((value) => value + 1)}>{activityRefreshStatus === 'refreshing' ? 'Refreshing…' : 'Refresh'}</button> : null}
               </div>
-              {activityStatus === 'loading' ? (
+              {activityRefreshStatus === 'error' && activities.length > 0 ? <p className="mt-3 text-sm font-semibold text-red-700">Activity refresh failed. Showing your last loaded activity.</p> : null}
+              {activityStatus === 'loading' && activities.length === 0 ? (
                 <div className="mt-5 rounded-[1.5rem] bg-lake-canvas px-5 py-8 text-center text-sm font-semibold text-slate" role="status">Loading wallet activity…</div>
-              ) : activityStatus === 'error' ? (
+              ) : activityStatus === 'error' && activities.length === 0 ? (
                 <div className="mt-5 rounded-[1.5rem] border border-red-200 bg-red-50 px-5 py-7 text-center">
                   <p className="font-semibold text-red-700">Wallet activity could not be loaded.</p>
                   <p className="mt-2 text-sm leading-6 text-red-700">Your balances and transactions were not changed.</p>

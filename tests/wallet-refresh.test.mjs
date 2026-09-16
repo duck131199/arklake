@@ -87,16 +87,22 @@ test('Home and Wallet share a visible balance refresh that replaces stale root s
   assert.match(app, /onWalletRefresh=\{refreshSharedBalances\}/)
 })
 
-test('Wallet reads Arc Activity every five seconds while visible and runs provider persistence in the background', () => {
+test('Wallet renders saved Activity first, then reads Arc every five seconds and runs provider persistence in the background', () => {
   const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
+  assert.match(app, /fetch\('\/api\/circle\/activity-sync', \{ credentials: 'include', cache: 'no-store' \}\)/)
   assert.match(app, /fetch\('\/api\/circle\/activity-sync\?mode=arc', \{ method: 'POST', credentials: 'include', cache: 'no-store' \}\)/)
-  assert.match(app, /loadSavedActivities\(\)[\s\S]*void syncActivities\(\)/)
+  assert.match(app, /manualRefresh[\s\S]*readSavedActivities\(\)[\s\S]*refreshSavedActivitiesAfterArc\(\)[\s\S]*syncActivities\(\)/)
   assert.match(app, /newConfirmedReceive[\s\S]*pollBalanceAfterReceive/)
-  assert.match(app, /document\.visibilityState !== 'visible'[\s\S]*loadSavedActivities\(\)/)
-  assert.match(app, /window\.setInterval\(pollRealtimeActivity, 5000\)/)
-  assert.match(app, /window\.clearInterval\(activityInterval\)/)
-  assert.match(app, /activityReadInFlightRef\.current/)
-  assert.match(app, /check: async \(\) => Boolean\(\(await loadSavedActivities\(\)\)/)
+  assert.match(app, /document\.visibilityState !== 'visible'[\s\S]*refreshSavedActivitiesAfterArc\(\)/)
+  assert.match(app, /initialRead[\s\S]*\.finally\(startActivityPolling\)/)
+  assert.match(app, /startActivityPolling[\s\S]*window\.setInterval\(pollRealtimeActivity, 5000\)/)
+  assert.match(app, /activityInterval !== undefined[\s\S]*window\.clearInterval\(activityInterval\)/)
+  assert.match(app, /activityReadPromiseRef\.current/)
+  assert.match(app, /activityRefreshQueuedRef\.current = true/)
+  assert.match(app, /if \(!activityRefreshQueuedRef\.current\) return null/)
+  assert.match(app, /activityRequestGenerationRef\.current/)
+  assert.match(app, /generation !== activityRequestGenerationRef\.current/)
+  assert.match(app, /check: async \(\) => Boolean\(\(await refreshSavedActivitiesAfterArc\(\)\)/)
 
   const endpoint = readFileSync(new URL('../api/circle/activity-sync.ts', import.meta.url), 'utf8')
   assert.match(endpoint, /req\.method !== 'GET' && req\.method !== 'POST'/)
@@ -120,6 +126,148 @@ test('Wallet reads Arc Activity every five seconds while visible and runs provid
   assert.match(migration, /circle_wallet_id text primary key/)
   assert.match(migration, /greatest\(wallet_activity_sync_cursors\.last_scanned_block, excluded\.last_scanned_block\)/)
   assert.match(migration, /revoke all on function[\s\S]*from public, anon, authenticated/)
+})
+
+test('manual Activity refresh preserves existing rows through refresh and failure', () => {
+  const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
+  assert.match(app, /const retainExistingActivities = activitiesRef\.current\.length > 0/)
+  assert.match(app, /retainExistingActivities[\s\S]*setActivityRefreshStatus\('refreshing'\)[\s\S]*setActivityStatus\('loading'\)/)
+  assert.match(app, /activitiesRef\.current\.length > 0[\s\S]*setActivityStatus\('ready'\)[\s\S]*setActivityRefreshStatus\('error'\)/)
+  assert.match(app, /activityStatus === 'error' && activities\.length === 0/)
+  assert.match(app, /Activity refresh failed\. Showing your last loaded activity\./)
+  assert.match(app, /activityRefreshStatus === 'refreshing' \? 'Refreshing…' : 'Refresh'/)
+})
+
+test('manual Activity refresh queues once behind an in-flight read and stale responses cannot apply', () => {
+  const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
+  assert.match(app, /if \(activityReadPromiseRef\.current\)[\s\S]*if \(!queueIfBusy\) return activityReadPromiseRef\.current/)
+  assert.match(app, /activityRefreshQueuedRef\.current = true[\s\S]*await activityReadPromiseRef\.current\.catch/)
+  assert.match(app, /activityRefreshQueuedRef\.current = false/)
+  assert.match(app, /const generation = \+\+activityRequestGenerationRef\.current/)
+  assert.match(app, /generation !== undefined && generation !== activityRequestGenerationRef\.current/)
+})
+
+test('Arc sync failure still re-reads saved Activity and lets the saved result decide the UI', () => {
+  const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
+  const walletPage = app.slice(app.indexOf('function AppWalletPage'), app.indexOf('function AppSwapPage'))
+  assert.match(walletPage, /const refreshSavedActivitiesAfterArc[\s\S]*await loadSavedActivities\(\)\.catch\(\(\) => null\)[\s\S]*return readSavedActivities\(generation\)/)
+  assert.match(walletPage, /const initialRead = manualRefresh[\s\S]*refreshSavedActivitiesAfterArc\(\{ queueIfBusy: true \}\)/)
+  assert.match(walletPage, /pollRealtimeActivity[\s\S]*refreshSavedActivitiesAfterArc\(\)\.then/)
+})
+
+test('Activity lists are applied only from the DB-only saved read after background synchronization', () => {
+  const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
+  const walletPage = app.slice(app.indexOf('function AppWalletPage'), app.indexOf('function AppSwapPage'))
+  assert.match(walletPage, /const readSavedActivities[\s\S]*return applyActivities\(data\.activities, generation\)/)
+  assert.doesNotMatch(walletPage, /fetch\('\/api\/circle\/activity-sync\?mode=arc'[\s\S]{0,500}applyActivities/)
+  assert.match(walletPage, /const syncActivities[\s\S]*return activityReadPromiseRef\.current \|\| readSavedActivities\(\)/)
+})
+
+function activityCycleHarness({ sync, read }) {
+  const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
+  const cycleSource = app.slice(app.indexOf('  const refreshSavedActivitiesAfterArc ='), app.indexOf('  const syncActivities ='))
+  const refs = {
+    activityReadPromiseRef: { current: null },
+    activityRefreshQueuedRef: { current: false },
+    activityRequestGenerationRef: { current: 0 },
+    activityMountedRef: { current: true },
+  }
+  const createCycle = new Function(...Object.keys(refs), 'loadSavedActivities', 'readSavedActivities', `${cycleSource}; return refreshSavedActivitiesAfterArc`)
+  return { ...refs, cycle: createCycle(...Object.values(refs), sync, read) }
+}
+
+function deferred() {
+  let resolve
+  let reject
+  const promise = new Promise((yes, no) => { resolve = yes; reject = no })
+  return { promise, resolve, reject }
+}
+
+test('poll ticks coalesce the whole cycle without invalidating the saved GET', async () => {
+  const post = deferred()
+  const get = deferred()
+  let posts = 0
+  let gets = 0
+  let applied = false
+  const h = activityCycleHarness({
+    sync: () => { posts += 1; return post.promise },
+    read: async (generation) => {
+      gets += 1
+      await get.promise
+      assert.equal(generation, h.activityRequestGenerationRef.current)
+      assert.ok(h.activityReadPromiseRef.current, 'lock remains held until saved data applies')
+      applied = true
+      return { activities: [{ id: 'new-receive' }], newConfirmedReceive: true }
+    },
+  })
+  const first = h.cycle()
+  const tickDuringPost = h.cycle()
+  post.resolve()
+  await Promise.resolve()
+  await Promise.resolve()
+  const tickDuringGet = h.cycle()
+  assert.equal(h.activityRequestGenerationRef.current, 1)
+  get.resolve()
+  const results = await Promise.all([first, tickDuringPost, tickDuringGet])
+  assert.equal(posts, 1)
+  assert.equal(gets, 1)
+  assert.equal(applied, true)
+  assert.ok(results.every((result) => result.activities[0].id === 'new-receive'))
+  assert.equal(h.activityReadPromiseRef.current, null)
+})
+
+test('manual refresh queues one whole cycle and a failed POST still applies saved data', async () => {
+  const post = deferred()
+  let posts = 0
+  let gets = 0
+  const h = activityCycleHarness({
+    sync: () => { posts += 1; return posts === 1 ? post.promise : Promise.reject(new Error('sync failed')) },
+    read: async () => { gets += 1; return { activities: [{ id: `saved-${gets}` }], newConfirmedReceive: false } },
+  })
+  const first = h.cycle()
+  const manual = h.cycle({ queueIfBusy: true })
+  const anotherManual = h.cycle({ queueIfBusy: true })
+  assert.equal(h.activityRequestGenerationRef.current, 1)
+  post.resolve()
+  await Promise.all([first, manual, anotherManual])
+  assert.equal(posts, 2)
+  assert.equal(gets, 2)
+  assert.equal(h.activityRequestGenerationRef.current, 2)
+})
+
+test('unmount prevents an in-flight cycle from starting its queued successor', async () => {
+  const post = deferred()
+  let posts = 0
+  const h = activityCycleHarness({ sync: () => { posts += 1; return post.promise }, read: async () => null })
+  const first = h.cycle()
+  const manual = h.cycle({ queueIfBusy: true })
+  h.activityMountedRef.current = false
+  post.resolve()
+  await Promise.all([first, manual])
+  assert.equal(posts, 1)
+  const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
+  assert.match(app, /const applyActivities[\s\S]*if \(!activityMountedRef\.current\) return null/)
+})
+
+test('initial Activity failure still renders the large retry state without a baseline', () => {
+  const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
+  assert.match(app, /if \(activitiesRef\.current\.length > 0\)[\s\S]*else \{\s*setActivityStatus\('error'\)/)
+  assert.match(app, /activityStatus === 'error' && activities\.length === 0[\s\S]*Wallet activity could not be loaded\./)
+  assert.match(app, /onClick=\{\(\) => setActivityRefresh\(\(value\) => value \+ 1\)\}>Try again<\/button>/)
+})
+
+test('saved Activity is applied before background Arc sync and background failure is non-destructive', () => {
+  const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
+  const walletPage = app.slice(app.indexOf('function AppWalletPage'), app.indexOf('function AppSwapPage'))
+  const savedRead = app.indexOf("fetch('/api/circle/activity-sync', { credentials: 'include', cache: 'no-store' })")
+  const arcSync = app.indexOf("fetch('/api/circle/activity-sync?mode=arc'")
+  assert.ok(savedRead >= 0)
+  assert.ok(arcSync > savedRead)
+  assert.match(walletPage, /const arcSync = manualRefresh \? Promise\.resolve\(result\) : refreshSavedActivitiesAfterArc\(\)/)
+  assert.match(walletPage, /void arcSync\.then\([\s\S]*\)\.catch\(\(\) => \{\}\)/)
+  assert.match(walletPage, /return applyActivities\(data\.activities, generation\)\s*}/)
+  assert.match(walletPage, /generation !== undefined && generation !== activityRequestGenerationRef\.current/)
+  assert.match(walletPage, /!hasActivityBaselineRef\.current \|\| document\.visibilityState !== 'visible'/)
 })
 
 test('shared balance refresh reads canonical USDC from Arc without waiting for Circle indexing', () => {
