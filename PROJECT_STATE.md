@@ -123,6 +123,33 @@ Status: **INVOICE CORE + PUBLIC INVOICE V1 CHECKPOINTED — PAYMENT ENTRY + DOWN
 - Scan to Pay + plaintext Memo V2 is **PRODUCTION PASS** with no regression in the Sep 14, 2026 QR lifecycle production retest. Production WalletConnect invoice `ARK-20260914-A96E69A1` paid 1 USDC after Scan to Pay in a successful Arcscan transaction with decoded direct `pay(address recipient,uint256 amount,string paymentReference,string memo)` and matching `InvoicePayment` log: recipient matched the invoice receiving wallet, canonical USDC, exact amount `1000000 = 1 USDC`, `paymentReference = ARK-20260914-A96E69A1`, and plaintext `memo = QA production test Second line memo`; the invoice stayed submitted/confirming until strict on-chain verification and only then became Paid at Sep 14, 2026, 2:16 PM. Earlier production WalletConnect invoice `ARK-20260913-BD68354E` paid 5 USDC in transaction `0x129caf8dff19f5502a6753e0549d696e2345f952c98fcd62a6fea43a6e173c81`; the strict verifier matched the external payer `0xB1f9eE64333564050964241688899166307d446e`, recipient `0xfe7b60284682c530f4f03b0954aa459ab193bac8`, canonical USDC token, exact amount, `paymentReference = ARK-20260913-BD68354E`, and plaintext `memo = Cascade` from the V2 `InvoicePayment` event before the invoice and bound intent became Paid.
 - Scan to Pay WalletConnect QR lifecycle is **LOCAL RUNTIME PASS** and **PRODUCTION PASS**. Production invoice `ARK-20260914-A96E69A1` confirmed the lifecycle sequence: Scan to Pay opened the WalletConnect QR on first attempt, closing the QR/modal before payment reset the connection and showed `Connection request reset. Please try again.`, the same invoice reopened Scan to Pay without reload/F5 and showed a new usable QR, a mobile wallet on another device scanned and connected, approval/transaction continued on Arc Testnet, the web UI moved to Confirming payment with `The transaction was submitted. Waiting for strict on-chain verification...`, and the invoice did not become Paid until strict on-chain verification completed. The close/reset message is the expected recoverable lifecycle state, not a bug.
 
+## Circle Gateway prototype
+
+Status: **TECHNICAL SPIKE DONE — END-TO-END RUNTIME PASS — NOT PRODUCTION-INTEGRATED**
+
+- The prototype is isolated under `prototype/gateway-spike-a1/` and is not wired into production Arklake.
+- Network configuration: Polygon Amoy source domain `7`; Arc Testnet destination domain `26`; Polygon Amoy USDC `0x41E94Eb019C0762f9bfcf9fb1E58725BfB0e7582`; Polygon GatewayWallet `0x0077777d7EBA4688BDeF3E311b846F25870A19B9`.
+- Runtime identities: Arc recipient SCA `0xd94074edb1da4c98959d455172beb58e4400324f`; Polygon depositor SCA `0x23d9e79e4dde2b3f85dda67c82b699ba111b8226`. Polygon EOA `0x9fe1c42d082ef97cf127107dcec500ad2ce900d2` was provisioned during investigation only, never received delegate permission, and is not part of the proven route.
+- Pinned Circle packages used by the proven route: `@circle-fin/app-kit@1.15.1`, `@circle-fin/unified-balance-kit@1.7.0`, `@circle-fin/provider-gateway-v1@1.5.0`, and `@circle-fin/adapter-circle-wallets@1.7.2`.
+- A1 Circle authentication and `SIGN_TYPEDDATA` with the UCW SCA: **RUNTIME PASS**.
+- A2/A2.1 Polygon Amoy SCA discovery and provisioning: **RUNTIME PASS**.
+- A2.3 exact approval and deposit of 2 USDC from the Polygon SCA into Gateway: **RUNTIME PASS**. Circle Gas Station sponsored the Polygon SCA contract execution while its native balance was `0 POL`.
+- A3.1 live Gateway estimate, BurnIntent preparation, and Circle signing: **RUNTIME PASS**. Live `/v1/estimate` returns a top-level array and EVM address fields as bytes20; the prototype validates their semantic values and normalizes all eight address fields to bytes32 for the exact object used for signing and submission.
+- A3.2 custom low-level direct-SCA `/v1/transfer`: **REJECTED**. Exact Gateway error: `Invalid signature: recovered signer does not match sourceSigner`. This custom A3 request path is superseded and must not be retried; it is not evidence against the later official Kit ERC-1271 route.
+- The EOA delegate route investigated for A3.3 is **ABANDONED / NOT REQUIRED**. Do not implement `addDelegate` for this prototype.
+- A3.3a provisioned a `MATIC-AMOY` EOA for the same authenticated Circle user: **RUNTIME PASS**. Address `0x9fe1c42d082ef97cf127107dcec500ad2ce900d2`, `accountType = EOA`, and `eth_getCode = 0x`.
+- **No delegate permission has been granted.**
+- A4.2a official Unified Balance Kit estimate: **RUNTIME PASS** for exact route `Polygon_Amoy_Testnet → Arc_Testnet`, amount `1 USDC`, explicit Polygon SCA allocation, exact Arc SCA recipient, and `useForwarder = false`. Before spend, Gateway held `2.000000 USDC`; the estimate reported provider fee `0.00005 USDC`, gas fee `0.0016 USDC`, and required total `1.001650 USDC`.
+- A4.2b official `kit.unifiedBalance.spend()` route: **END-TO-END RUNTIME PASS**. Circle challenges `gateway.v1.signBurnIntents` and `gateway.v1.gatewayMint` both passed. Kit steps `buildBurnIntents`, `signBurnIntents`, `fetchAttestation`, and `mint` all succeeded. Arc destination transaction `0x2d917a6d7d5589b2d78c0781ccaf9ebb411f53405a76343eb65c52c68b850301` has a successful receipt. Arc USDC increased from `242626785` to `243626785` base units, exactly `+1000000 = +1 USDC`. Gateway available balance decreased from `2.000000` to `0.998500 USDC`, an actual delta of `-1.001500 USDC`.
+- Runtime observation only: actual Gateway delta was `0.000150 USDC` lower than the estimated required amount. No fee reconciliation behavior was added.
+- Current source of truth and recommended technical route: `Circle UCW SCA → createCircleUserWalletAdapter → AppKit / Unified Balance Kit → estimateSpend() → spend() → UCW challenge relay → ERC-1271 contractSigner → Gateway attestation → gatewayMint → Arc Testnet USDC`.
+- Circle provider default transport retry behavior is retained because it reuses the exact signed intent and TransferSpec hash. Arklake must not retry the whole `spend()` operation automatically.
+
+### Security and closure
+
+- A3.3b is not a next checkpoint. No `addDelegate`, EOA fallback, automatic retry, custom `/v1/transfer`, or additional deposit is required for the proven route.
+- The technical spike is complete. Production product architecture, lifecycle, recovery, limits, monitoring, and security review remain separate work; runtime proof does not mean the prototype is production-ready.
+
 ### Product constraint for future Public Invoice / Payment
 
 - A payer must not be required to have an Arklake account to open or pay an invoice.
