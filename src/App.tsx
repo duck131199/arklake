@@ -2057,6 +2057,16 @@ function AppHomePage({ onNavigate, balances, wallet, circleAuth, email, onBalanc
                   <h2 className="mt-4 text-xl font-semibold tracking-[-0.04em] text-arklake-ink">Send</h2>
                   <p className="mt-1 text-sm leading-6 text-slate">Send USDC on Arc Testnet</p>
                 </button>
+
+                <a href="https://faucet.circle.com/" target="_blank" rel="noopener noreferrer" className="min-h-[148px] rounded-[1.75rem] border border-lake-border bg-surface p-5 text-left shadow-sm sm:col-start-2 xl:col-start-auto">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-full bg-aqua-mist text-arklake-aqua">
+                    <svg className="h-5 w-5" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                      <path d="M10 2.75s-5.5 6-5.5 9.25a5.5 5.5 0 0 0 11 0c0-3.25-5.5-9.25-5.5-9.25Z" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </div>
+                  <h2 className="mt-4 text-xl font-semibold tracking-[-0.04em] text-arklake-ink">Faucet</h2>
+                  <p className="mt-1 text-sm leading-6 text-slate">Get test USDC for Arklake</p>
+                </a>
               </div>
             </section>
 
