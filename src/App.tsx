@@ -2037,35 +2037,35 @@ function AppHomePage({ onNavigate, balances, wallet, circleAuth, email, onBalanc
                 </div>
               </div>
 
-              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
-                <button type="button" className="min-h-[148px] rounded-[1.75rem] border border-lake-border bg-surface p-5 text-left shadow-sm" onClick={() => setHomeAction('receive')}>
-                  <div className="flex h-11 w-11 items-center justify-center rounded-full bg-aqua-mist text-arklake-aqua">
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1 xl:auto-rows-fr xl:gap-3">
+                <button type="button" className="min-h-[148px] rounded-[1.75rem] border border-lake-border bg-surface p-5 text-left shadow-sm xl:grid xl:min-h-0 xl:grid-cols-[2.75rem_minmax(0,1fr)] xl:content-center xl:gap-x-4 xl:py-4" onClick={() => setHomeAction('receive')}>
+                  <div className="flex h-11 w-11 items-center justify-center rounded-full xl:row-span-2 xl:self-center bg-aqua-mist text-arklake-aqua">
                     <svg className="h-5 w-5" viewBox="0 0 20 20" fill="none" aria-hidden="true">
                       <path d="M10 4.5v10M6.25 10.75 10 14.5l3.75-3.75" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
                     </svg>
                   </div>
-                  <h2 className="mt-4 text-xl font-semibold tracking-[-0.04em] text-arklake-ink">Receive</h2>
-                  <p className="mt-1 text-sm leading-6 text-slate">Receive USDC on Arc Testnet</p>
+                  <h2 className="mt-4 text-xl font-semibold tracking-[-0.04em] text-arklake-ink xl:mt-0">Receive</h2>
+                  <p className="mt-1 text-sm leading-6 text-slate xl:mt-0">Receive USDC on Arc Testnet</p>
                 </button>
 
-                <button type="button" className="min-h-[148px] rounded-[1.75rem] border border-aqua-mist bg-aqua-mist p-5 text-left shadow-sm" onClick={() => setHomeAction('send')}>
-                  <div className="flex h-11 w-11 items-center justify-center rounded-full bg-white text-arklake-aqua">
+                <button type="button" className="min-h-[148px] rounded-[1.75rem] border border-aqua-mist bg-aqua-mist p-5 text-left shadow-sm xl:grid xl:min-h-0 xl:grid-cols-[2.75rem_minmax(0,1fr)] xl:content-center xl:gap-x-4 xl:py-4" onClick={() => setHomeAction('send')}>
+                  <div className="flex h-11 w-11 items-center justify-center rounded-full xl:row-span-2 xl:self-center bg-white text-arklake-aqua">
                     <svg className="h-5 w-5" viewBox="0 0 20 20" fill="none" aria-hidden="true">
                       <path d="M10 15.5v-10M6.25 9.25 10 5.5l3.75 3.75" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
                     </svg>
                   </div>
-                  <h2 className="mt-4 text-xl font-semibold tracking-[-0.04em] text-arklake-ink">Send</h2>
-                  <p className="mt-1 text-sm leading-6 text-slate">Send USDC on Arc Testnet</p>
+                  <h2 className="mt-4 text-xl font-semibold tracking-[-0.04em] text-arklake-ink xl:mt-0">Send</h2>
+                  <p className="mt-1 text-sm leading-6 text-slate xl:mt-0">Send USDC on Arc Testnet</p>
                 </button>
 
-                <a href="https://faucet.circle.com/" target="_blank" rel="noopener noreferrer" className="min-h-[148px] rounded-[1.75rem] border border-lake-border bg-surface p-5 text-left shadow-sm sm:col-start-2 xl:col-start-auto">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-full bg-aqua-mist text-arklake-aqua">
+                <a href="https://faucet.circle.com/" target="_blank" rel="noopener noreferrer" className="min-h-[148px] rounded-[1.75rem] border border-lake-border bg-surface p-5 text-left shadow-sm xl:grid xl:min-h-0 xl:grid-cols-[2.75rem_minmax(0,1fr)] xl:content-center xl:gap-x-4 xl:py-4 sm:col-start-2 xl:col-start-auto">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-full xl:row-span-2 xl:self-center bg-aqua-mist text-arklake-aqua">
                     <svg className="h-5 w-5" viewBox="0 0 20 20" fill="none" aria-hidden="true">
                       <path d="M10 2.75s-5.5 6-5.5 9.25a5.5 5.5 0 0 0 11 0c0-3.25-5.5-9.25-5.5-9.25Z" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
                     </svg>
                   </div>
-                  <h2 className="mt-4 text-xl font-semibold tracking-[-0.04em] text-arklake-ink">Faucet</h2>
-                  <p className="mt-1 text-sm leading-6 text-slate">Get test USDC for Arklake</p>
+                  <h2 className="mt-4 text-xl font-semibold tracking-[-0.04em] text-arklake-ink xl:mt-0">Faucet</h2>
+                  <p className="mt-1 text-sm leading-6 text-slate xl:mt-0">Get test USDC for Arklake</p>
                 </a>
               </div>
             </section>
