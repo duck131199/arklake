@@ -67,6 +67,10 @@ type StoredWallet = {
   account_type: string
 }
 
+export type GatewayReadOnlyContextResult =
+  | { ok: true; userToken: string; circleUserId: string; arcWallet: StoredWallet }
+  | { ok: false; reason: 'AUTHENTICATION_REQUIRED' | 'SESSION_STORE_UNAVAILABLE' | 'ACCOUNT_CORRELATION_FAILED' | 'ARC_WALLET_UNAVAILABLE' }
+
 function base64UrlEncode(value: string) {
   return Buffer.from(value).toString('base64url')
 }
@@ -113,7 +117,7 @@ function parseCookies(cookieHeader: string | undefined) {
   }).filter(([key]) => key))
 }
 
-function verifySessionCookie(cookieValue: string | undefined) {
+function verifySessionCookie(cookieValue: string | undefined): SessionPayload | null {
   if (!cookieValue) return null
 
   const [body, signature] = cookieValue.split('.')
@@ -127,7 +131,7 @@ function verifySessionCookie(cookieValue: string | undefined) {
 
     const payload = JSON.parse(base64UrlDecode(body)) as Partial<SessionPayload>
     if (!payload.sid) return null
-    return payload
+    return { sid: payload.sid }
   } catch {
     return null
   }
@@ -329,6 +333,33 @@ export async function getCircleRecoverySession(cookieHeader: string | undefined)
 
   if (walletError || !wallet) return null
   return { userToken: session.circle_user_token, walletId: wallet.circle_wallet_id }
+}
+
+export async function getGatewayReadOnlyContext(cookieHeader: string | undefined): Promise<GatewayReadOnlyContextResult> {
+  const sessionCookie = verifySessionCookie(parseCookies(cookieHeader)[cookieName])
+  if (!sessionCookie) return { ok: false, reason: 'AUTHENTICATION_REQUIRED' }
+
+  const supabase = getSupabaseClient()
+  const { data: session, error: sessionError } = await supabase
+    .from('arklake_sessions')
+    .select('sid, account_id, circle_user_token, expires_at, revoked_at, arklake_accounts(circle_user_id)')
+    .eq('sid', sessionCookie.sid)
+    .maybeSingle<StoredSession>()
+  if (sessionError) return { ok: false, reason: 'SESSION_STORE_UNAVAILABLE' }
+  if (!session || session.revoked_at || new Date(session.expires_at).getTime() <= Date.now()) return { ok: false, reason: 'AUTHENTICATION_REQUIRED' }
+  const circleUserId = session.arklake_accounts?.circle_user_id
+  if (!circleUserId) return { ok: false, reason: 'ACCOUNT_CORRELATION_FAILED' }
+
+  const { data: arcWallet, error: walletError } = await supabase
+    .from('arklake_wallets')
+    .select('circle_wallet_id, address, blockchain, account_type')
+    .eq('account_id', session.account_id)
+    .eq('blockchain', 'ARC-TESTNET')
+    .eq('account_type', 'SCA')
+    .maybeSingle<StoredWallet>()
+  if (walletError) return { ok: false, reason: 'SESSION_STORE_UNAVAILABLE' }
+  if (!arcWallet) return { ok: false, reason: 'ARC_WALLET_UNAVAILABLE' }
+  return { ok: true, userToken: session.circle_user_token, circleUserId, arcWallet }
 }
 
 async function updateCurrentSessionCircleTokens(sid: string, payload: SessionTokenRefreshPayload) {
