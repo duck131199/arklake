@@ -68,7 +68,7 @@ type StoredWallet = {
 }
 
 export type GatewayReadOnlyContextResult =
-  | { ok: true; userToken: string; circleUserId: string; arcWallet: StoredWallet }
+  | { ok: true; accountId: string; userToken: string; circleUserId: string; arcWallet: StoredWallet }
   | { ok: false; reason: 'AUTHENTICATION_REQUIRED' | 'SESSION_STORE_UNAVAILABLE' | 'ACCOUNT_CORRELATION_FAILED' | 'ARC_WALLET_UNAVAILABLE' }
 
 function base64UrlEncode(value: string) {
@@ -359,7 +359,7 @@ export async function getGatewayReadOnlyContext(cookieHeader: string | undefined
     .maybeSingle<StoredWallet>()
   if (walletError) return { ok: false, reason: 'SESSION_STORE_UNAVAILABLE' }
   if (!arcWallet) return { ok: false, reason: 'ARC_WALLET_UNAVAILABLE' }
-  return { ok: true, userToken: session.circle_user_token, circleUserId, arcWallet }
+  return { ok: true, accountId: session.account_id, userToken: session.circle_user_token, circleUserId, arcWallet }
 }
 
 async function updateCurrentSessionCircleTokens(sid: string, payload: SessionTokenRefreshPayload) {
