@@ -2,7 +2,7 @@ import { AppKit } from '@circle-fin/app-kit'
 import { createCircleUserWalletAdapter } from '@circle-fin/adapter-circle-wallets/ucw/server'
 import { createClient } from '@supabase/supabase-js'
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { getGatewayReadOnlyContext } from '../auth/session.js'
+import { getGatewayReadOnlyContext } from '../../api/auth/session.js'
 import {
   GatewayReadinessError,
   correlateGatewayWallets,
@@ -11,19 +11,19 @@ import {
   parseRpcQuantity,
   parseUsdcBaseUnits,
   type CircleWallet,
-} from '../../server/circle/gateway-readiness.js'
+} from './gateway-readiness.js'
 import {
   GATEWAY_MOVE_ESTIMATE_TTL_MS,
   GatewayMovePreparationError,
   parseGatewayMoveAmount,
   prepareGatewayMoveEstimate,
-} from '../../server/circle/gateway-move-preparation.js'
+} from './gateway-move-preparation.js'
 import {
   GatewayMovePreparationConflictError,
   createOrReplayGatewayMoveOperation,
   getGatewayMoveOperationByPreparationKey,
   toPublicGatewayMoveOperation,
-} from '../../server/circle/gateway-move-operation.js'
+} from './gateway-move-operation.js'
 
 const circleApiBaseUrl = 'https://api.circle.com/v1/w3s'
 const polygonRpcUrl = process.env.POLYGON_AMOY_RPC_URL || 'https://polygon-amoy-bor-rpc.publicnode.com'

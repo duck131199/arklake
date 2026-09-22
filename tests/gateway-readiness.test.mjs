@@ -115,7 +115,7 @@ test('success response contains public state but no Circle wallet or internal ID
 })
 
 test('endpoint is GET-only, identity comes from HttpOnly session, and no state-changing API is present', () => {
-  const endpoint = readFileSync(new URL('../api/circle/gateway-readiness.ts', import.meta.url), 'utf8')
+  const endpoint = readFileSync(new URL('../server/circle/gateway-readiness-handler.ts', import.meta.url), 'utf8')
   const session = readFileSync(new URL('../api/auth/session.ts', import.meta.url), 'utf8')
   assert.match(endpoint, /req\.method !== 'GET'/)
   assert.match(endpoint, /getGatewayReadOnlyContext\(req\.headers\.cookie\)/)
@@ -130,7 +130,7 @@ test('endpoint is GET-only, identity comes from HttpOnly session, and no state-c
 })
 
 test('endpoint maps operational and correlation failures to UNKNOWN without raw errors', () => {
-  const endpoint = readFileSync(new URL('../api/circle/gateway-readiness.ts', import.meta.url), 'utf8')
+  const endpoint = readFileSync(new URL('../server/circle/gateway-readiness-handler.ts', import.meta.url), 'utf8')
   assert.match(endpoint, /readinessStatus: 'UNKNOWN'/)
   assert.match(endpoint, /ACCOUNT_CIRCLE_MISMATCH/)
   assert.match(endpoint, /ARC_WALLET_MISMATCH/)

@@ -1,6 +1,6 @@
 import { AppKit } from '@circle-fin/app-kit'
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { getGatewayReadOnlyContext } from '../auth/session.js'
+import { getGatewayReadOnlyContext } from '../../api/auth/session.js'
 import {
   GatewayReadinessError,
   gatewayReadinessConfig,
@@ -8,7 +8,7 @@ import {
   parseRpcQuantity,
   parseUsdcBaseUnits,
   type CircleWallet,
-} from '../../server/circle/gateway-readiness.js'
+} from './gateway-readiness.js'
 
 const circleApiBaseUrl = 'https://api.circle.com/v1/w3s'
 const polygonRpcUrl = process.env.POLYGON_AMOY_RPC_URL || 'https://polygon-amoy-bor-rpc.publicnode.com'
@@ -157,9 +157,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (context.reason === 'AUTHENTICATION_REQUIRED') {
         return json(res, 401, { ok: false, readinessStatus: 'UNKNOWN', error: { code: 'AUTHENTICATION_REQUIRED', stage: 'session', retryable: false } })
       }
-      const code = context.reason === 'SESSION_STORE_UNAVAILABLE' ? 'SESSION_STORE_UNAVAILABLE'
-        : context.reason === 'ARC_WALLET_UNAVAILABLE' ? 'ARC_WALLET_MISMATCH' : 'ACCOUNT_CIRCLE_MISMATCH'
-      const status = context.reason === 'SESSION_STORE_UNAVAILABLE' ? 503 : 409
+      const reason = context.reason
+      const code = reason === 'SESSION_STORE_UNAVAILABLE' ? 'SESSION_STORE_UNAVAILABLE'
+        : reason === 'ARC_WALLET_UNAVAILABLE' ? 'ARC_WALLET_MISMATCH' : 'ACCOUNT_CIRCLE_MISMATCH'
+      const status = reason === 'SESSION_STORE_UNAVAILABLE' ? 503 : 409
       return json(res, status, { ok: false, readinessStatus: 'UNKNOWN', error: { code, stage: 'account_correlation', retryable: status === 503 } })
     }
 

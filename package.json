@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && npm run typecheck:api && vite build",
+    "typecheck:api": "tsc -p tsconfig.api.json --pretty false",
     "preview": "vite preview",
     "gateway-worker": "node worker/gateway-worker.mjs"
   },

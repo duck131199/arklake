@@ -40,9 +40,12 @@ async function receipt(txHash: string) {
     signal: AbortSignal.timeout(15000),
   })
   if (!response.ok) throw new Error('Unable to check on-chain confirmation.')
-  const data = await response.json()
+  const data = await response.json() as {
+    error?: unknown
+    result?: { status: string; blockNumber: string } | null
+  }
   if (data.error) throw new Error('Unable to check on-chain confirmation.')
-  return data.result as { status: string; blockNumber: string } | null
+  return data.result ?? null
 }
 
 export default async function handler(req: IncomingMessage & { body?: Record<string, unknown> }, res: ServerResponse) {
@@ -93,7 +96,9 @@ export default async function handler(req: IncomingMessage & { body?: Record<str
       signal: AbortSignal.timeout(15000),
     })
     if (!walletsResponse.ok) return json(walletsResponse.status === 401 ? 401 : 502, { error: 'Circle wallet lookup failed. Refresh signing access and retry.' })
-    const wallets = await walletsResponse.json()
+    const wallets = await walletsResponse.json() as {
+      data?: { wallets?: Array<{ id: string; address: `0x${string}`; blockchain: string; accountType: string }> }
+    }
     const wallet = wallets.data?.wallets?.find((item: { id: string; blockchain: string; accountType: string }) => item.id === body.walletId && item.blockchain === 'ARC-TESTNET' && item.accountType === 'SCA')
     if (!wallet || !/^0x[0-9a-fA-F]{40}$/.test(wallet.address)) return json(403, { error: 'Existing Arc Testnet SCA wallet was not found.' })
 

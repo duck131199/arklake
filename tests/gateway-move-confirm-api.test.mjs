@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
-const endpoint = readFileSync(new URL('../api/circle/gateway-move-confirm.ts', import.meta.url), 'utf8')
+const endpoint = readFileSync(new URL('../server/circle/gateway-move-confirm-handler.ts', import.meta.url), 'utf8')
 const operation = readFileSync(new URL('../server/circle/gateway-move-operation.ts', import.meta.url), 'utf8')
 
 test('confirm endpoint accepts only operationId and derives account ownership from the HttpOnly session', () => {
