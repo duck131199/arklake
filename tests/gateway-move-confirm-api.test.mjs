@@ -13,11 +13,11 @@ test('confirm endpoint accepts only operationId and derives account ownership fr
   assert.match(endpoint, /Cache-Control', 'no-store'/)
 })
 
-test('confirm endpoint delegates ownership, state and freshness to the atomic claim RPC', () => {
+test('confirm endpoint delegates ownership, state, freshness and REAL job creation to one atomic RPC', () => {
   const handler = endpoint.slice(endpoint.indexOf('export default async function handler'))
-  assert.match(handler, /claimGatewayMoveOperation\(db, context\.accountId, body\.operationId\)/)
+  assert.match(handler, /confirmAndEnqueueGatewayMoveOperation\(db, context\.accountId, body\.operationId, context\.sessionId\)/)
   assert.doesNotMatch(handler, /estimateCreatedAt|estimate_created_at|GATEWAY_MOVE_ESTIMATE_TTL_MS|Date\.now/)
-  assert.match(operation, /rpc\('claim_gateway_move_operation'/)
+  assert.match(operation, /rpc\('confirm_and_enqueue_gateway_move_operation'/)
 })
 
 test('confirm endpoint maps every claim result without reporting payment completion', () => {
@@ -34,6 +34,8 @@ test('confirm response uses the existing safe public projection', () => {
   const projection = operation.slice(operation.indexOf('export function toPublicGatewayMoveOperation'), operation.indexOf('export class GatewayMovePreparationConflictError'))
   assert.doesNotMatch(projection, /account_id|preparation_key|source_wallet_id|destination_wallet_id|userToken|refreshToken|encryptionKey/)
   assert.doesNotMatch(endpoint, /error\.message|error\.stack/)
+  const response = endpoint.slice(endpoint.indexOf('return json(res, 200'))
+  assert.doesNotMatch(response, /sessionId|authSession|userToken|refreshToken|encrypted|recovery/i)
 })
 
 test('Phase 4A.3 stops before every Circle or execution boundary', () => {

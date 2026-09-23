@@ -2,7 +2,7 @@ import { createClient } from '@supabase/supabase-js'
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { getGatewayReadOnlyContext } from '../../api/auth/session.js'
 import {
-  claimGatewayMoveOperation,
+  confirmAndEnqueueGatewayMoveOperation,
   getGatewayMoveOperation,
   toPublicGatewayMoveOperation,
 } from './gateway-move-operation.js'
@@ -49,11 +49,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return failure(res, 503, 'OPERATION_STORE_UNAVAILABLE', 'account_correlation', context.reason === 'SESSION_STORE_UNAVAILABLE')
     }
     const db = database() as any
-    const claim = await claimGatewayMoveOperation(db, context.accountId, body.operationId)
+    const claim = await confirmAndEnqueueGatewayMoveOperation(db, context.accountId, body.operationId, context.sessionId)
     if (claim.result === 'not_found') return failure(res, 404, 'OPERATION_NOT_FOUND', 'claim')
     if (claim.result === 'expired') return failure(res, 409, 'ESTIMATE_EXPIRED', 'claim')
     if (claim.result === 'active_operation_exists') return failure(res, 409, 'ACTIVE_OPERATION_EXISTS', 'claim')
     if (claim.result === 'not_executable') return failure(res, 409, 'OPERATION_NOT_CONFIRMABLE', 'claim')
+    if (claim.result === 'auth_context_unavailable') return failure(res, 401, 'AUTHENTICATION_REQUIRED', 'session')
     if (!claim.claimed) return failure(res, 503, 'OPERATION_STORE_UNAVAILABLE', 'claim', true)
 
     const operation = await getGatewayMoveOperation(db, context.accountId, body.operationId)
@@ -63,6 +64,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return json(res, 200, {
       ok: true,
       claimed: true,
+      replayed: claim.replayed,
       operation: toPublicGatewayMoveOperation(operation),
     })
   } catch {

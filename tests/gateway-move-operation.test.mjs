@@ -5,7 +5,7 @@ import {
   GATEWAY_MOVE_DESTINATION_CHAIN,
   GATEWAY_MOVE_SOURCE_CHAIN,
   GatewayMovePreparationConflictError,
-  claimGatewayMoveOperation,
+  confirmAndEnqueueGatewayMoveOperation,
   createOrReplayGatewayMoveOperation,
   createGatewayMoveOperation,
   gatewayMoveTransitionAllowed,
@@ -18,6 +18,7 @@ const migration = readFileSync(new URL('../supabase/migrations/202609200001_gate
 const accountA = '11111111-1111-4111-8111-111111111111'
 const accountB = '22222222-2222-4222-8222-222222222222'
 const operationId = '33333333-3333-4333-8333-333333333333'
+const sessionId = '55555555-5555-4555-8555-555555555555'
 const addressA = `0x${'1'.repeat(40)}`
 const addressB = `0x${'2'.repeat(40)}`
 
@@ -106,33 +107,35 @@ test('state model rejects invalid and terminal transitions', () => {
   }
 })
 
-test('atomic claim succeeds once and a second claim is rejected', async () => {
-  const db = database({ claimResults: [{ result: 'claimed', operation_id: operationId }, { result: 'not_executable', status: 'SUBMITTING' }] })
+test('atomic confirm creates once and safely replays the existing REAL job', async () => {
+  const db = database({ claimResults: [{ result: 'created', operation_id: operationId }, { result: 'replayed', status: 'SUBMITTING' }] })
   const [first, second] = await Promise.all([
-    claimGatewayMoveOperation(db, accountA, operationId),
-    claimGatewayMoveOperation(db, accountA, operationId),
+    confirmAndEnqueueGatewayMoveOperation(db, accountA, operationId, sessionId),
+    confirmAndEnqueueGatewayMoveOperation(db, accountA, operationId, sessionId),
   ])
   assert.equal(first.claimed, true)
-  assert.equal(second.claimed, false)
+  assert.equal(first.replayed, false)
+  assert.equal(second.claimed, true)
+  assert.equal(second.replayed, true)
   assert.equal(second.status, 'SUBMITTING')
 })
 
 test('UNKNOWN and COMPLETED operations cannot be claimed again', async () => {
   for (const status of ['UNKNOWN', 'COMPLETED']) {
-    const result = await claimGatewayMoveOperation(database({ claimResults: [{ result: 'not_executable', status }] }), accountA, operationId)
-    assert.deepEqual(result, { claimed: false, result: 'not_executable', status })
+    const result = await confirmAndEnqueueGatewayMoveOperation(database({ claimResults: [{ result: 'not_executable', status }] }), accountA, operationId, sessionId)
+    assert.deepEqual(result, { claimed: false, replayed: false, result: 'not_executable', status })
   }
 })
 
 test('expired estimates are terminal and cannot be claimed', async () => {
-  const result = await claimGatewayMoveOperation(database({ claimResults: [{ result: 'expired', status: 'EXPIRED' }] }), accountA, operationId)
-  assert.deepEqual(result, { claimed: false, result: 'expired', status: 'EXPIRED' })
+  const result = await confirmAndEnqueueGatewayMoveOperation(database({ claimResults: [{ result: 'expired', status: 'EXPIRED' }] }), accountA, operationId, sessionId)
+  assert.deepEqual(result, { claimed: false, replayed: false, result: 'expired', status: 'EXPIRED' })
   assert.equal(gatewayMoveTransitionAllowed('EXPIRED', 'SUBMITTING'), false)
 })
 
 test('cross-account reads and claims do not reveal the operation', async () => {
   assert.equal(await getGatewayMoveOperation(database(), accountB, operationId), null)
-  const result = await claimGatewayMoveOperation(database({ claimResults: [{ result: 'claimed' }] }), accountB, operationId)
+  const result = await confirmAndEnqueueGatewayMoveOperation(database({ claimResults: [{ result: 'created' }] }), accountB, operationId, sessionId)
   assert.equal(result.result, 'not_found')
 })
 

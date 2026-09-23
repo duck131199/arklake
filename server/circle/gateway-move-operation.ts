@@ -73,7 +73,7 @@ type GatewayMoveDatabase = {
       }
     }
   }
-  rpc(name: 'claim_gateway_move_operation', args: { p_operation_id: string; p_account_id: string }): QueryResult<Record<string, unknown>>
+  rpc(name: 'confirm_and_enqueue_gateway_move_operation', args: { p_operation_id: string; p_account_id: string; p_session_id: string }): QueryResult<Record<string, unknown>>
 }
 
 export type CreateGatewayMoveOperationInput = {
@@ -249,15 +249,17 @@ export async function getGatewayMoveOperation(database: GatewayMoveDatabase, acc
   return data
 }
 
-export async function claimGatewayMoveOperation(database: GatewayMoveDatabase, accountId: string, operationId: string) {
-  const { data, error } = await database.rpc('claim_gateway_move_operation', {
+export async function confirmAndEnqueueGatewayMoveOperation(database: GatewayMoveDatabase, accountId: string, operationId: string, sessionId: string) {
+  const { data, error } = await database.rpc('confirm_and_enqueue_gateway_move_operation', {
     p_operation_id: operationId,
     p_account_id: accountId,
+    p_session_id: sessionId,
   })
-  if (error || !data || typeof data.result !== 'string') throw new Error('Gateway Move operation claim failed.')
+  if (error || !data || typeof data.result !== 'string') throw new Error('Gateway Move operation confirmation failed.')
   return {
-    claimed: data.result === 'claimed',
-    result: data.result as 'claimed' | 'not_found' | 'not_executable' | 'active_operation_exists' | 'expired',
+    claimed: data.result === 'created' || data.result === 'replayed',
+    replayed: data.result === 'replayed',
+    result: data.result as 'created' | 'replayed' | 'not_found' | 'not_executable' | 'active_operation_exists' | 'expired' | 'auth_context_unavailable',
     status: typeof data.status === 'string' ? data.status : null,
   }
 }
