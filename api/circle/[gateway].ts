@@ -2,11 +2,15 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import gatewayReadiness from '../../server/circle/gateway-readiness-handler.js'
 import gatewayMovePrepare from '../../server/circle/gateway-move-prepare-handler.js'
 import gatewayMoveConfirm from '../../server/circle/gateway-move-confirm-handler.js'
+import gatewayMoveExecution from '../../server/circle/gateway-move-execution-handler.js'
+import gatewayLocalChallengeFixture from '../../server/circle/gateway-local-challenge-fixture-handler.js'
 
 const gatewayHandlers = {
   'gateway-readiness': gatewayReadiness,
   'gateway-move-prepare': gatewayMovePrepare,
   'gateway-move-confirm': gatewayMoveConfirm,
+  'gateway-move-execution': gatewayMoveExecution,
+  'gateway-local-challenge-fixture': gatewayLocalChallengeFixture,
 } as const
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {

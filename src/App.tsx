@@ -7,6 +7,7 @@ import { bindInvoicePaymentIntent, connectInvoiceWalletConnect, createInvoicePay
 import type { W3SSdk as CircleW3SSdk } from '@circle-fin/w3s-pw-web-sdk'
 import { arcTestnetChainIdHex, connectExternalWallet, externalUsdcAmount, externalWalletError, readExternalUsdcBalance, submitExternalInvoicePayment, switchExternalWalletToArc, type ExternalWalletProvider } from './external-wallet'
 import { hasNewConfirmedReceive, runBoundedVisiblePoll } from './wallet-refresh'
+import GatewayChallengeBridge from './GatewayChallengeBridge'
 
 const shellWidth = 'site-shell'
 
@@ -4248,6 +4249,42 @@ function AppSwapPage({ onNavigate, balances, wallet, circleAuth, email, onBalanc
   )
 }
 
+function AppGatewayMovePage({ operationId, onNavigate, circleAuth, email, onCircleAuthRefresh }: { operationId: string; onNavigate: AppNavigateHandler; circleAuth: CircleAuthContext | null; email: string; onCircleAuthRefresh: (circleAuth: CircleSessionRefresh) => Promise<boolean> }) {
+  return (
+    <AppShell activeItem="Wallet" title="Gateway Move" subtitle="Review wallet authorization." onNavigate={onNavigate}>
+      <GatewayChallengeBridge
+        operationId={operationId}
+        circleAuth={circleAuth}
+        appId={circleAppId || ''}
+        signingPanel={<CircleSigningReauthPanel email={email} onComplete={onCircleAuthRefresh} title="Wallet approval needed" />}
+      />
+    </AppShell>
+  )
+}
+
+let localGatewayChallengeFixtureRequest: Promise<string> | null = null
+
+function LocalGatewayChallengeFixturePage({ onNavigate }: { onNavigate: AppNavigateHandler }) {
+  const [error, setError] = useState('')
+  useEffect(() => {
+    let cancelled = false
+    localGatewayChallengeFixtureRequest ??= fetch('/api/circle/gateway-local-challenge-fixture', {
+      method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: '{}',
+    }).then(async (response) => {
+      const data = await response.json().catch(() => null) as { operationId?: string; error?: { code?: string } } | null
+      if (!response.ok || !data?.operationId) throw new Error(data?.error?.code || 'Fixture preparation failed.')
+      return data.operationId
+    })
+    void localGatewayChallengeFixtureRequest.then((operationId) => {
+      if (!cancelled) onNavigate(`/app/gateway/move/${operationId}`)
+    }).catch((reason) => {
+      if (!cancelled) setError(reason instanceof Error ? reason.message : 'Fixture preparation failed.')
+    })
+    return () => { cancelled = true }
+  }, [onNavigate])
+  return <main className="grid min-h-screen place-items-center bg-lake-canvas text-sm font-semibold text-slate">{error || 'Preparing local Challenge Bridge review…'}</main>
+}
+
 function AccountRow({ label, value, detail }: { label: string; value: string; detail?: string }) {
   return (
     <div className="flex flex-col items-start gap-3 py-4 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
@@ -5389,6 +5426,7 @@ export default function App() {
     ? currentPath.slice('/app/invoices/'.length)
     : null
   const publicInvoiceId = currentPath.startsWith('/invoice/') ? currentPath.slice('/invoice/'.length) : null
+  const gatewayMoveId = currentPath.startsWith('/app/gateway/move/') ? currentPath.slice('/app/gateway/move/'.length) : null
   const selectedInvoice = invoiceDetailId ? runtimeInvoices.find((invoice) => invoice.id === invoiceDetailId) : undefined
 
   if (publicInvoiceId) {
@@ -5437,6 +5475,14 @@ export default function App() {
 
   if (currentPath === '/app/swap') {
     return <AppSwapPage onNavigate={handleAppNavigate} balances={arklakeBalances} wallet={arklakeWallet} circleAuth={circleAuth} email={arklakeEmail} onBalancesRefresh={setArklakeBalances} onCircleAuthRefresh={handleCircleAuthRefresh} />
+  }
+
+  if (import.meta.env.DEV && window.location.hostname === 'localhost' && currentPath === '/app/gateway/local-challenge-test') {
+    return <LocalGatewayChallengeFixturePage onNavigate={handleAppNavigate} />
+  }
+
+  if (gatewayMoveId) {
+    return <AppGatewayMovePage operationId={gatewayMoveId} onNavigate={handleAppNavigate} circleAuth={circleAuth} email={arklakeEmail} onCircleAuthRefresh={handleCircleAuthRefresh} />
   }
 
   if (currentPath === '/app/account') {

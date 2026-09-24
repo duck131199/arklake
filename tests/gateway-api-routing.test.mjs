@@ -4,10 +4,12 @@ import { readFileSync, readdirSync } from 'node:fs'
 
 const router = readFileSync(new URL('../api/circle/[gateway].ts', import.meta.url), 'utf8')
 
-test('one dynamic function preserves the three public Gateway route segments', () => {
+test('one dynamic function preserves the Gateway route segments including the challenge bridge', () => {
   assert.match(router, /'gateway-readiness': gatewayReadiness/)
   assert.match(router, /'gateway-move-prepare': gatewayMovePrepare/)
   assert.match(router, /'gateway-move-confirm': gatewayMoveConfirm/)
+  assert.match(router, /'gateway-move-execution': gatewayMoveExecution/)
+  assert.match(router, /'gateway-local-challenge-fixture': gatewayLocalChallengeFixture/)
   assert.match(router, /req\.query\.gateway/)
 })
 
